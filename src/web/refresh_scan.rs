@@ -949,6 +949,36 @@ impl RefreshContextSource for LiveRefreshContext {
     }
 }
 
+/// #393: what a refresh's cost row records, or `None` for no row.
+///
+/// - `Err(OwnedByOtherKind)` → `None`. `run_phased_scan` raises it while
+///   reading the ownership markers, before gather; there is no up-front
+///   classifier probe on this path (#394), so it spent no GPU time.
+///   `run_refresh_with` turns it into a deferral, not a failure.
+/// - Any other `Err` → `Failed`.
+/// - `Ok` whose staging was left resumable (cost cap, or a transient
+///   classifier stop mid-burst) → `Paused` — the same line
+///   [`classify_refresh`] draws for `RefreshOutcome::Resumable`.
+/// - Otherwise → `Completed`.
+pub(crate) fn refresh_cost_outcome(
+    result: &anyhow::Result<ScanSummary>,
+) -> Option<crate::observability::scan_cost::ScanCostOutcome> {
+    use crate::observability::scan_cost::ScanCostOutcome;
+    use crate::web::scan_job::{classify_full_scan, ScanCompletion};
+    match result {
+        Err(e) => match e.downcast_ref::<PhasedScanError>() {
+            Some(PhasedScanError::OwnedByOtherKind(_)) => None,
+            None => Some(ScanCostOutcome::Failed),
+        },
+        Ok(s) => Some(
+            match classify_full_scan(s.degraded, s.final_phase.as_deref(), s.skipped) {
+                ScanCompletion::Resumable => ScanCostOutcome::Paused,
+                _ => ScanCostOutcome::Completed,
+            },
+        ),
+    }
+}
+
 /// Production entry: everything fallible is inside `setup`.
 ///
 /// Returns the same `ScanReport` as `run_scan`, so `run_claim`'s two arms have
@@ -996,73 +1026,93 @@ pub(crate) async fn run_refresh(
             models: Arc::clone(&models),
         });
         let pipeline = move |plan: RefreshPlan| async move {
-            let candidates = plan.candidates.len();
-            // No up-front classifier probe (#394). The probe is paid lazily
-            // inside `CachedClassifier`, once, on the first verdict that has to
-            // be computed. A refresh that gathers nothing classifiable — every
-            // candidate deleted, or nothing due — never wakes the GPU; one that
-            // does classify still refuses a mismatched Stage-2 policy before
-            // its first batch is sent (#344 F5), now after gather rather than
-            // before it. Gather is Bluesky I/O; the GPU is what costs money.
-            db.set_scan_state(&uid, "refresh_candidates", &candidates.to_string())
+            // #393: record this refresh's GPU cost whether it scores or fails.
+            let started_at = crate::observability::scan_cost::now_rfc3339();
+            let result: anyhow::Result<_> = async {
+                let candidates = plan.candidates.len();
+                // No up-front classifier probe (#394). The probe is paid lazily
+                // inside `CachedClassifier`, once, on the first verdict that has to
+                // be computed. A refresh that gathers nothing classifiable — every
+                // candidate deleted, or nothing due — never wakes the GPU; one that
+                // does classify still refuses a mismatched Stage-2 policy before
+                // its first batch is sent (#344 F5), now after gather rather than
+                // before it. Gather is Bluesky I/O; the GPU is what costs money.
+                db.set_scan_state(&uid, "refresh_candidates", &candidates.to_string())
+                    .await?;
+                // Minor 5: `candidates_total` is the denominator GET /api/status
+                // renders. `amplification::run` writes it for a full scan and
+                // `run_candidates` does not, so without this the dashboard showed
+                // the PREVIOUS full scan's denominator against this refresh's
+                // progress — two runs' numbers in one fraction.
+                db.set_scan_state(&uid, "candidates_total", &candidates.to_string())
+                    .await?;
+                // The feed cache measured nothing when nothing was due, and a
+                // "0 % hit rate" from an empty run is worse than no number (R08).
+                db.set_scan_state(
+                    &uid,
+                    "refresh_feed_cache_applicable",
+                    if candidates == 0 { "0" } else { "1" },
+                )
                 .await?;
-            // Minor 5: `candidates_total` is the denominator GET /api/status
-            // renders. `amplification::run` writes it for a full scan and
-            // `run_candidates` does not, so without this the dashboard showed
-            // the PREVIOUS full scan's denominator against this refresh's
-            // progress — two runs' numbers in one fraction.
-            db.set_scan_state(&uid, "candidates_total", &candidates.to_string())
+                // From here the pipeline reports through the `scan_phase` marker
+                // and the classification counts, exactly as the full scan does —
+                // GET /api/status refines this message from them.
+                set_progress(
+                    &progress_manager,
+                    &uid,
+                    &progress_claim,
+                    WebScanPhase::Scoring,
+                    &format!("Re-scoring {candidates} accounts whose scores are expiring…"),
+                )
+                .await;
+                let weights = crate::scoring::threat::ThreatWeights::default();
+                let summary = crate::pipeline::amplification::run_candidates(
+                    &client,
+                    &scorers.scorer,
+                    &db,
+                    &uid,
+                    &plan.candidates,
+                    &plan.fingerprint,
+                    &weights,
+                    Some(&models.embedder),
+                    plan.protected_embedding.as_deref(),
+                    Some(&plan.centroids),
+                    Some(&models.nli),
+                    Some(&plan.protected_posts),
+                    Some(config.data_dir()),
+                    plan.median_engagement,
+                    REFRESH_GATHER_CONCURRENCY,
+                    RunIdentity::refresh(),
+                    "refresh_feed",
+                )
                 .await?;
-            // The feed cache measured nothing when nothing was due, and a
-            // "0 % hit rate" from an empty run is worse than no number (R08).
-            db.set_scan_state(
-                &uid,
-                "refresh_feed_cache_applicable",
-                if candidates == 0 { "0" } else { "1" },
-            )
-            .await?;
-            // From here the pipeline reports through the `scan_phase` marker
-            // and the classification counts, exactly as the full scan does —
-            // GET /api/status refines this message from them.
-            set_progress(
-                &progress_manager,
-                &uid,
-                &progress_claim,
-                WebScanPhase::Scoring,
-                &format!("Re-scoring {candidates} accounts whose scores are expiring…"),
-            )
+                db.set_scan_state(&uid, "refresh_scored", &summary.accounts_scored.to_string())
+                    .await?;
+                record_scan_cache_stats(db.as_ref(), &uid, &scorers).await;
+                info!(
+                    user_did = %uid,
+                    candidates,
+                    scored = summary.accounts_scored,
+                    "refresh pipeline finished"
+                );
+                Ok::<_, anyhow::Error>(summary)
+            }
             .await;
-            let weights = crate::scoring::threat::ThreatWeights::default();
-            let summary = crate::pipeline::amplification::run_candidates(
-                &client,
-                &scorers.scorer,
-                &db,
-                &uid,
-                &plan.candidates,
-                &plan.fingerprint,
-                &weights,
-                Some(&models.embedder),
-                plan.protected_embedding.as_deref(),
-                Some(&plan.centroids),
-                Some(&models.nli),
-                Some(&plan.protected_posts),
-                Some(config.data_dir()),
-                plan.median_engagement,
-                REFRESH_GATHER_CONCURRENCY,
-                RunIdentity::refresh(),
-                "refresh_feed",
-            )
-            .await?;
-            db.set_scan_state(&uid, "refresh_scored", &summary.accounts_scored.to_string())
-                .await?;
-            record_scan_cache_stats(db.as_ref(), &uid, &scorers).await;
-            info!(
-                user_did = %uid,
-                candidates,
-                scored = summary.accounts_scored,
-                "refresh pipeline finished"
-            );
-            Ok(summary)
+            // A deferral to a full scan's staging (`None`) is not a run: it is
+            // raised before gather, so nothing reached the GPU to record.
+            if let Some(outcome) = refresh_cost_outcome(&result) {
+                crate::observability::scan_cost::record_scan_cost(
+                    db.as_ref(),
+                    &uid,
+                    crate::db::ScanKind::Refresh,
+                    outcome,
+                    &started_at,
+                    &scorers.cost_meter,
+                    &scorers.classifier_stats,
+                )
+                .await;
+            }
+            result
         };
         Ok((ctx, pipeline))
     };
@@ -2100,6 +2150,52 @@ mod tests {
         );
         assert_eq!(db.next_refresh_at("did:plc:u").await.unwrap(), None);
         assert_eq!(db.export_scores("did:plc:u").await.unwrap(), before);
+    }
+
+    /// #393: the refresh's cost-row outcome. A pause (cost cap or a
+    /// transient classifier stop that left staging resumable) is `paused`; a
+    /// deferral to a full scan's staging is not recorded at all, because it
+    /// is raised before gather — no classifier call can precede it.
+    #[test]
+    fn refresh_cost_outcome_maps_pause_failure_and_deferral() {
+        use crate::observability::scan_cost::ScanCostOutcome;
+        use crate::pipeline::scan_phases::PhasedScanError;
+        let summary = |phase: &str, degraded, interrupted, skipped| ScanSummary {
+            accounts_scored: 1,
+            regathered: 0,
+            degraded,
+            interrupted,
+            final_phase: Some(phase.into()),
+            skipped,
+        };
+        let ok = |s| -> anyhow::Result<ScanSummary> { Ok(s) };
+        assert_eq!(
+            refresh_cost_outcome(&ok(summary("done", false, false, Some(0)))),
+            Some(ScanCostOutcome::Completed)
+        );
+        // Cost-capped: staging left at burst.
+        assert_eq!(
+            refresh_cost_outcome(&ok(summary("burst", true, false, Some(0)))),
+            Some(ScanCostOutcome::Paused)
+        );
+        // Transient classifier stop mid-burst.
+        assert_eq!(
+            refresh_cost_outcome(&ok(summary("burst", true, true, Some(0)))),
+            Some(ScanCostOutcome::Paused)
+        );
+        // A recovery-burst timeout that still reached `done` finished (with
+        // skips) — the same line `classify_refresh` draws.
+        assert_eq!(
+            refresh_cost_outcome(&ok(summary("done", false, true, Some(1)))),
+            Some(ScanCostOutcome::Completed)
+        );
+        assert_eq!(
+            refresh_cost_outcome(&Err(anyhow::anyhow!("boom"))),
+            Some(ScanCostOutcome::Failed)
+        );
+        let deferred: anyhow::Result<ScanSummary> =
+            Err(PhasedScanError::OwnedByOtherKind(ScanKind::Full).into());
+        assert_eq!(refresh_cost_outcome(&deferred), None);
     }
 
     /// Completion is classified from persisted state, not from the invocation's

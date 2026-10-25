@@ -95,3 +95,39 @@ fn estimate_cost_uses_shared_default_rate() {
     // Non-runpod backends remain 0.
     assert_eq!(estimate_cost_cents("zentropi", one_hour_ms), 0);
 }
+
+#[test]
+fn snapshot_reports_integral_rate_and_matching_cents() {
+    let m = ScanCostMeter::new(500, 329);
+    m.force_worker_seconds(3600.0);
+    let s = m.snapshot();
+    assert_eq!(s.rate_cents_per_hour, 329);
+    assert_eq!(s.est_cents, 329);
+    assert!(s.worker_secs >= 3600.0);
+    assert_eq!(s.peak_in_flight, 0, "no request ever entered");
+}
+
+#[test]
+fn snapshot_rounds_cents_so_small_refreshes_are_not_recorded_as_free() {
+    // ~8 worker-seconds at 329c/h is ~0.73c. Truncating would store 0 for
+    // every small nightly refresh and the ledger's sums would understate spend.
+    let m = ScanCostMeter::new(500, 329);
+    m.force_worker_seconds(8.0);
+    assert_eq!(m.snapshot().est_cents, 1);
+}
+
+#[test]
+fn snapshot_of_an_unused_meter_is_zero() {
+    let s = ScanCostMeter::new(500, 329).snapshot();
+    assert_eq!((s.worker_secs, s.est_cents, s.peak_in_flight), (0.0, 0, 0));
+}
+
+#[test]
+fn snapshot_reports_peak_concurrency_through_the_public_api() {
+    let m = ScanCostMeter::new(500, 329);
+    {
+        let _a = m.guard();
+        let _b = m.guard();
+    }
+    assert_eq!(m.snapshot().peak_in_flight, 2);
+}

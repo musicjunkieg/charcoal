@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- #393 — every full scan and nightly refresh records its estimated GPU cost
+  in a new `scan_costs` table (schema v20), success or failure, and logs a
+  one-line summary. The admin page shows per-user full-scan, refresh and
+  total cost plus 7- and 30-day totals, and flags any user whose full-scan
+  cost to date is over the $2.00 onboarding target. The figure is the app's own meter — a lower bound
+  that excludes the idle time RunPod bills per worker — and is labelled so.
+  A scan refused by the Stage-2 identity probe still records what it spent.
 - #404 — `charcoal eval-classifiers`: compares classifiers (today CoPE-B and
   Detoxify; Jev, Clef and Strands Decider follow in Part B) on the same posts.
   Headline false-alarm and miss rates come from a fixed hash-chosen holdout;

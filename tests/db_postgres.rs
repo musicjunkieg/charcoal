@@ -3788,6 +3788,52 @@ async fn test_pg_migration_v18_creates_expiry_and_refresh_columns() {
     assert!(recorded, "0018 must self-record its version");
 }
 
+/// v20 (#393) on an authentic v19 fixture: a normal boot adds `scan_costs`
+/// and the migration self-records version 20 exactly once. Mirrors
+/// `test_migration_v20_adds_scan_costs_to_a_v19_database` in schema.rs.
+#[tokio::test]
+async fn test_pg_migration_v20_adds_scan_costs_to_v19() {
+    let Some(murl) = migrations_database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _fixture = migrations_fixture(&murl, 19).await;
+    let pool = Pool::<Postgres>::connect(&murl).await.unwrap();
+    let has_table = || async {
+        sqlx_core::query::query(
+            "SELECT COUNT(*) > 0 FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_name = 'scan_costs'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get::<bool, _>(0)
+    };
+    let max: i64 = sqlx_core::query::query("SELECT MAX(version)::bigint FROM schema_version")
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(max, 19, "fixture is genuinely at v19 before the upgrade");
+    assert!(!has_table().await);
+
+    // Two boots: the second must find v20 recorded and do nothing.
+    drop(charcoal::db::connect_postgres(&murl).await.unwrap());
+    drop(charcoal::db::connect_postgres(&murl).await.unwrap());
+
+    assert!(has_table().await);
+    let recorded: i64 =
+        sqlx_core::query::query("SELECT COUNT(*) FROM schema_version WHERE version = 20")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(recorded, 1, "v20 self-recorded exactly once");
+}
+
 /// v18 upgrade, on the dedicated `_migrations` database (V3-06): an
 /// AUTHENTIC v17 fixture (via `migrate_postgres_through`, not columns
 /// reconstructed by dropping them off a current database — V2-07) with live
@@ -6161,4 +6207,70 @@ async fn test_pg_success_schedule_write_clears_the_streak() {
         .unwrap());
     assert_eq!(db.get_scan_state(DID, KEY).await.unwrap(), None);
     db.delete_user_data(DID).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_pg_scan_costs_aggregate_window_and_delete() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    const A: &str = "did:plc:pgtest_scancost_a";
+    const B: &str = "did:plc:pgtest_scancost_b";
+    for d in [A, B] {
+        db.delete_user_data(d).await.unwrap();
+    }
+    let row = |did: &str, kind: &str, at: &str, cents: i64| charcoal::db::ScanCostRow {
+        user_did: did.into(),
+        kind: kind.into(),
+        outcome: "completed".into(),
+        started_at: at.into(),
+        finished_at: at.into(),
+        classifications: 10,
+        classifier_cache_hits: 2,
+        metered_worker_secs: 1.5,
+        peak_in_flight: 1,
+        est_cents: cents,
+        rate_cents_per_hour: 329,
+    };
+    db.insert_scan_cost(&row(A, "full", "2099-01-01T00:00:00Z", 150))
+        .await
+        .unwrap();
+    // A resumed full scan's first, cost-capped chunk: `paused` must pass the
+    // CHECK constraint, and its cents still count toward the user's total.
+    db.insert_scan_cost(&charcoal::db::ScanCostRow {
+        outcome: "paused".into(),
+        ..row(A, "full", "2099-01-01T06:00:00Z", 40)
+    })
+    .await
+    .unwrap();
+    db.insert_scan_cost(&row(A, "refresh", "2099-01-02T00:00:00Z", 7))
+        .await
+        .unwrap();
+    db.insert_scan_cost(&row(B, "refresh", "2099-01-03T00:00:00Z", 3))
+        .await
+        .unwrap();
+
+    let users = db.list_user_scan_costs().await.unwrap();
+    let a = users.iter().find(|u| u.user_did == A).expect("A listed");
+    assert_eq!(
+        (a.full_scan_cents, a.refresh_cents, a.total_cents, a.runs),
+        (Some(190), 7, 197, 3)
+    );
+    // 2099 dates keep this window free of other tests' rows.
+    assert_eq!(
+        db.scan_cost_cents_since("2099-01-02T00:00:00Z")
+            .await
+            .unwrap(),
+        10
+    );
+
+    db.delete_user_data(A).await.unwrap();
+    assert!(db
+        .list_user_scan_costs()
+        .await
+        .unwrap()
+        .iter()
+        .all(|u| u.user_did != A));
+    db.delete_user_data(B).await.unwrap();
 }

@@ -681,6 +681,30 @@ pub fn create_tables_through(conn: &Connection, max_version: i64) -> Result<()> 
         )
     })?;
 
+    // v20 (#393): per-scan GPU cost ledger. Mirrors 0020_scan_costs.sql.
+    run_migration(conn, 20, max_version, |c| {
+        c.execute_batch(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS scan_costs (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 user_did TEXT NOT NULL,
+                 kind TEXT NOT NULL CHECK (kind IN ('full', 'refresh')),
+                 outcome TEXT NOT NULL CHECK (outcome IN ('completed', 'paused', 'failed')),
+                 started_at TEXT NOT NULL,
+                 finished_at TEXT NOT NULL,
+                 classifications INTEGER NOT NULL,
+                 classifier_cache_hits INTEGER NOT NULL,
+                 metered_worker_secs REAL NOT NULL,
+                 peak_in_flight INTEGER NOT NULL,
+                 est_cents INTEGER NOT NULL,
+                 rate_cents_per_hour INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS scan_costs_user_started ON scan_costs (user_did, started_at);
+             CREATE INDEX IF NOT EXISTS scan_costs_started ON scan_costs (started_at);
+             COMMIT;",
+        )
+    })?;
+
     Ok(())
 }
 
@@ -745,8 +769,8 @@ mod tests {
         // inferred_pairs, classification_queue, scan_account_input,
         // scan_skips, scan_queue, topic_clusters, access_requests,
         // oauth_sessions, action_batches, actions, account_feed_snapshots,
-        // onnx_scores, classifier_verdicts = 20 tables (v16)
-        assert_eq!(count, 20i64);
+        // onnx_scores, classifier_verdicts, scan_costs = 21 tables (v20)
+        assert_eq!(count, 21i64);
     }
 
     #[test]
@@ -818,7 +842,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, (1..=19).collect::<Vec<i64>>());
+        assert_eq!(versions, (1..=20).collect::<Vec<i64>>());
     }
 
     #[test]
@@ -922,10 +946,10 @@ mod tests {
         // inferred_pairs, classification_queue, scan_account_input,
         // scan_skips, scan_queue, topic_clusters, access_requests,
         // oauth_sessions, action_batches, actions, account_feed_snapshots,
-        // onnx_scores, classifier_verdicts = 20 tables (v16)
-        assert_eq!(count, 20i64);
+        // onnx_scores, classifier_verdicts, scan_costs = 21 tables (v20)
+        assert_eq!(count, 21i64);
 
-        // Verify schema_version includes v4 through v19
+        // Verify schema_version includes v4 through v20
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -933,7 +957,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, (1..=19).collect::<Vec<i64>>());
+        assert_eq!(versions, (1..=20).collect::<Vec<i64>>());
     }
 
     /// Does `scan_queue` currently have a `claim_id` column?
@@ -1149,19 +1173,20 @@ mod tests {
             "DROP TABLE account_feed_snapshots;
              DROP TABLE onnx_scores;
              DROP TABLE classifier_verdicts;
-             DELETE FROM schema_version WHERE version IN (16, 17);",
+             DROP TABLE scan_costs;
+             DELETE FROM schema_version WHERE version IN (16, 17, 20);",
         )
         .unwrap();
         assert_eq!(table_count(&conn).unwrap(), 17i64, "v15 shape");
 
         create_tables(&conn).unwrap();
 
-        assert_eq!(table_count(&conn).unwrap(), 20i64);
+        assert_eq!(table_count(&conn).unwrap(), 21i64);
         let max: i64 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(
-            max, 19,
+            max, 20,
             "create_tables always advances to the latest version"
         );
         assert_eq!(cache_index_names(&conn), CACHE_INDEXES);
@@ -1397,7 +1422,7 @@ mod tests {
         let max: i64 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(max, 19, "create_tables runs on to the latest version");
+        assert_eq!(max, 20, "create_tables runs on to the latest version");
     }
 
     /// v19 (#394): an AUTHENTIC v18 database with a live score row gains
@@ -1435,5 +1460,39 @@ mod tests {
             )
             .unwrap();
         assert!(recorded);
+    }
+
+    /// v20 (#393) on an authentic v19 database: the ledger table appears,
+    /// the version is recorded, and a second boot is a no-op.
+    #[test]
+    fn test_migration_v20_adds_scan_costs_to_a_v19_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables_through(&conn, 19).unwrap();
+        let has_table = |c: &Connection| -> bool {
+            c.query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'scan_costs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert!(!has_table(&conn), "a v19 database has no ledger yet");
+
+        create_tables(&conn).unwrap();
+        create_tables(&conn).expect("a second boot must be a no-op");
+
+        assert!(has_table(&conn));
+        let max: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(max, 20);
+        let recorded: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_version WHERE version = 20",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(recorded, 1, "v20 recorded exactly once");
     }
 }

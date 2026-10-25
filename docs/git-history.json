@@ -1,5 +1,61 @@
 [
   {
+    "hash": "49d61316922554df9c9b642b091c1536ce4587ab",
+    "short_hash": "49d6131",
+    "author": "Bryan Guffey",
+    "date": "2026-10-25T01:33:50-07:00",
+    "message": "fix(393): round ledger cents so small refreshes are not free\n\nCodeRabbit: truncation recorded a ~0.7c refresh as 0, so every ledger\nsum understated spend. Only the snapshot rounds; trip logic unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
+    "hash": "593b04802c22b70815a16bb10c2757c60b5111a9",
+    "short_hash": "593b048",
+    "author": "Bryan Guffey",
+    "date": "2026-10-25T01:07:10-07:00",
+    "message": "Merge pull request #148 from musicjunkieg/fix/408-undecryptable-session\n\nfix(408): undecryptable OAuth session reads as not connected",
+    "files_changed": 0
+  },
+  {
+    "hash": "7e07b38169280389e8c978904eafc9437043ade3",
+    "short_hash": "7e07b38",
+    "author": "Bryan Guffey",
+    "date": "2026-10-24T22:14:16-07:00",
+    "message": "docs(393): record why pre-work failures write no cost row\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "786e3ba3dd5535d8af1245ff4d1d6c4d865bf75f",
+    "short_hash": "786e3ba",
+    "author": "Bryan Guffey",
+    "date": "2026-10-24T22:07:59-07:00",
+    "message": "fix(393): harden cost tests, add last-run column\n\nPeak concurrency is tested through the public guard API; the swallowed\nDB-failure test first proves the insert really fails; the endpoint test\ncovers exactly-$2.00 (not over) and a DID with no users row (null\nhandle). The admin table drops a dead row class, gains scope=col\nheaders and a Last run column (hidden under 640px).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
+    "hash": "045f2beb4998b541ff42d104d2d64d0e110bc4a6",
+    "short_hash": "045f2be",
+    "author": "Bryan Guffey",
+    "date": "2026-10-24T18:34:19-07:00",
+    "message": "docs(393): scan cost ledger implementation plan\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "632169b7b65d96f2d5b9f29a5183e3a85ed1d5af",
+    "short_hash": "632169b",
+    "author": "Bryan Guffey",
+    "date": "2026-10-24T18:07:56-07:00",
+    "message": "docs(393): scan cost ledger and alpha spend guardrails design\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "cee73e77a55a835b961c99d3b11210d1d56e6a72",
+    "short_hash": "cee73e7",
+    "author": "Bryan Guffey",
+    "date": "2026-10-24T16:23:39-07:00",
+    "message": "fix(408): lost refresh race to another key reads as not connected\n\nCodex review: reload_or_disconnect only checked the grant before\ndecrypting, so during a rolling key rotation an old-key replica that lost\na refresh race to a new-key re-consent returned a crypto error and the\nrunner failed the batch instead of parking it. It now uses the same\nconnected() check. The unreadable-row log drops to debug: the runner\nrechecks every parked batch on each wake.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "7589403b5a9afa69d4c7f8eddd0819d3ab9b5f36",
     "short_hash": "7589403",
     "author": "Bryan Guffey",

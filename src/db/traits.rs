@@ -385,6 +385,37 @@ pub struct ScanQueueDepth {
     pub running: usize,
 }
 
+/// One finished scan's estimated GPU cost, as written to `scan_costs` (#393).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScanCostRow {
+    pub user_did: String,
+    pub kind: String,
+    pub outcome: String,
+    pub started_at: String,
+    pub finished_at: String,
+    pub classifications: i64,
+    pub classifier_cache_hits: i64,
+    pub metered_worker_secs: f64,
+    pub peak_in_flight: i64,
+    pub est_cents: i64,
+    pub rate_cents_per_hour: i64,
+}
+
+/// Per-user roll-up of `scan_costs` for the spend report (#393).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct UserScanCost {
+    pub user_did: String,
+    pub handle: Option<String>,
+    /// Every `kind='full'` row summed — refused probes, failed attempts and
+    /// each resumed chunk alike, since all of it is onboarding spend. `None`
+    /// when the user has no full-scan row at all.
+    pub full_scan_cents: Option<i64>,
+    pub refresh_cents: i64,
+    pub total_cents: i64,
+    pub runs: i64,
+    pub last_finished_at: String,
+}
+
 /// One `access_requests` row (#309).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccessRequestRow {
@@ -1186,6 +1217,17 @@ pub trait Database: Send + Sync {
 
     /// All rows, oldest requested_at first.
     async fn list_access_requests(&self) -> Result<Vec<AccessRequestRow>>;
+
+    // --- Scan cost ledger (#393) ---
+
+    /// Record one finished scan's estimated cost.
+    async fn insert_scan_cost(&self, row: &ScanCostRow) -> Result<()>;
+
+    /// Per-user roll-up, highest total first.
+    async fn list_user_scan_costs(&self) -> Result<Vec<UserScanCost>>;
+
+    /// Total estimated cents for scans with `started_at >= since` (0 if none).
+    async fn scan_cost_cents_since(&self, since: &str) -> Result<i64>;
 
     // --- OAuth write sessions (#315) ---
 

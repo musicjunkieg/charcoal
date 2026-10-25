@@ -442,3 +442,67 @@ pub async fn delete_user(
 
     Ok(Json(serde_json::json!({"deleted": target_did})))
 }
+
+/// Full-scan cost to date (every `kind='full'` row: failed attempts and
+/// resumed chunks included) above which an onboarding is flagged (#385:
+/// Bryan's target is under $2.00 per new user).
+const ONBOARDING_TARGET_CENTS: i64 = 200;
+
+/// GET /api/admin/costs — estimated GPU spend (#393). Figures are the
+/// in-app meter's lower bound; RunPod also bills idle tails.
+pub async fn scan_costs(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, StatusCode> {
+    if !auth.is_admin {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let db_error = |e: anyhow::Error| {
+        tracing::error!(error = %format!("{e:#}"), "failed to read scan costs");
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+    let since = |days: i64| {
+        (chrono::Utc::now() - chrono::Duration::days(days))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    };
+    let last_7d = state
+        .db
+        .scan_cost_cents_since(&since(7))
+        .await
+        .map_err(db_error)?;
+    let last_30d = state
+        .db
+        .scan_cost_cents_since(&since(30))
+        .await
+        .map_err(db_error)?;
+    // Built field-by-field with json! (rather than serializing the struct and
+    // patching a key in) so there is no fallible serialization to swallow.
+    let users: Vec<serde_json::Value> = state
+        .db
+        .list_user_scan_costs()
+        .await
+        .map_err(db_error)?
+        .into_iter()
+        .map(|u| {
+            let over = u
+                .full_scan_cents
+                .is_some_and(|c| c > ONBOARDING_TARGET_CENTS);
+            serde_json::json!({
+                "user_did": u.user_did,
+                "handle": u.handle,
+                "full_scan_cents": u.full_scan_cents,
+                "refresh_cents": u.refresh_cents,
+                "total_cents": u.total_cents,
+                "runs": u.runs,
+                "last_finished_at": u.last_finished_at,
+                "over_onboarding_target": over,
+            })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({
+        "last_7d_cents": last_7d,
+        "last_30d_cents": last_30d,
+        "onboarding_target_cents": ONBOARDING_TARGET_CENTS,
+        "users": users,
+    })))
+}
