@@ -1461,4 +1461,38 @@ mod tests {
             .unwrap();
         assert!(recorded);
     }
+
+    /// v20 (#393) on an authentic v19 database: the ledger table appears,
+    /// the version is recorded, and a second boot is a no-op.
+    #[test]
+    fn test_migration_v20_adds_scan_costs_to_a_v19_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables_through(&conn, 19).unwrap();
+        let has_table = |c: &Connection| -> bool {
+            c.query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'scan_costs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert!(!has_table(&conn), "a v19 database has no ledger yet");
+
+        create_tables(&conn).unwrap();
+        create_tables(&conn).expect("a second boot must be a no-op");
+
+        assert!(has_table(&conn));
+        let max: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(max, 20);
+        let recorded: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_version WHERE version = 20",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(recorded, 1, "v20 recorded exactly once");
+    }
 }

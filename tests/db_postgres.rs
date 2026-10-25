@@ -3788,6 +3788,52 @@ async fn test_pg_migration_v18_creates_expiry_and_refresh_columns() {
     assert!(recorded, "0018 must self-record its version");
 }
 
+/// v20 (#393) on an authentic v19 fixture: a normal boot adds `scan_costs`
+/// and the migration self-records version 20 exactly once. Mirrors
+/// `test_migration_v20_adds_scan_costs_to_a_v19_database` in schema.rs.
+#[tokio::test]
+async fn test_pg_migration_v20_adds_scan_costs_to_v19() {
+    let Some(murl) = migrations_database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _fixture = migrations_fixture(&murl, 19).await;
+    let pool = Pool::<Postgres>::connect(&murl).await.unwrap();
+    let has_table = || async {
+        sqlx_core::query::query(
+            "SELECT COUNT(*) > 0 FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_name = 'scan_costs'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get::<bool, _>(0)
+    };
+    let max: i64 = sqlx_core::query::query("SELECT MAX(version)::bigint FROM schema_version")
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(max, 19, "fixture is genuinely at v19 before the upgrade");
+    assert!(!has_table().await);
+
+    // Two boots: the second must find v20 recorded and do nothing.
+    drop(charcoal::db::connect_postgres(&murl).await.unwrap());
+    drop(charcoal::db::connect_postgres(&murl).await.unwrap());
+
+    assert!(has_table().await);
+    let recorded: i64 =
+        sqlx_core::query::query("SELECT COUNT(*) FROM schema_version WHERE version = 20")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(recorded, 1, "v20 self-recorded exactly once");
+}
+
 /// v18 upgrade, on the dedicated `_migrations` database (V3-06): an
 /// AUTHENTIC v17 fixture (via `migrate_postgres_through`, not columns
 /// reconstructed by dropping them off a current database — V2-07) with live
