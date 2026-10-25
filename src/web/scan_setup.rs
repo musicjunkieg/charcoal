@@ -174,6 +174,11 @@ pub(crate) struct ScanScorers {
     pub scorer: TwoStageToxicityScorer,
     pub onnx_stats: Arc<CacheStats>,
     pub classifier_stats: Arc<CacheStats>,
+    /// This scan's GPU cost meter (#393). Zentropi scans leave it at zero —
+    /// that backend bills per request, not per GPU-second.
+    // Read by the end-of-scan cost ledger, which lands in a later #393 task.
+    #[allow(dead_code)]
+    pub cost_meter: Arc<crate::toxicity::cost_meter::ScanCostMeter>,
 }
 
 /// Build the two-stage scorer over the shared ONNX models and the caches.
@@ -200,9 +205,12 @@ pub(crate) fn build_scan_scorers(
     // configured Stage-2 classifier (CHARCOAL_CLASSIFIER) for a binary verdict.
     // #343 Phase 1: stage-2 verdicts are cached by (text hash, model, policy).
     let classifier_stats = Arc::new(CacheStats::default());
+    // #393: the meter is created here, not inside the classifier, so the
+    // scan can read what it spent when it finishes.
+    let cost_meter = Arc::new(crate::toxicity::cost_meter::ScanCostMeter::from_env());
     let classifier: Arc<dyn crate::toxicity::classifier::ToxicityClassifier> =
         Arc::new(crate::toxicity::cached_classifier::CachedClassifier::new(
-            crate::toxicity::classifier::build_from_env()?,
+            crate::toxicity::classifier::build_from_env_with_meter(Arc::clone(&cost_meter))?,
             Arc::clone(db),
             Arc::clone(&classifier_stats),
         ));
@@ -221,6 +229,7 @@ pub(crate) fn build_scan_scorers(
         scorer: TwoStageToxicityScorer::new(primary_scorer, classifier),
         onnx_stats,
         classifier_stats,
+        cost_meter,
     })
 }
 

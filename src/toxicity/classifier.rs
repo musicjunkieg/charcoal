@@ -171,6 +171,18 @@ impl ToxicityClassifier for StubClassifier {
 /// `Err` when the var is unset, empty, or holds an unrecognized value —
 /// the binary refuses to boot in those cases (spec §"Backend selection").
 pub fn build_from_env() -> Result<Arc<dyn ToxicityClassifier>> {
+    build_from_env_with_meter(Arc::new(
+        crate::toxicity::cost_meter::ScanCostMeter::from_env(),
+    ))
+}
+
+/// As [`build_from_env`], but the RunPod backend bills into the given meter.
+/// Callers that need the scan's cost afterwards (#393) build the meter
+/// themselves and keep a handle. Zentropi bills per request, not per
+/// GPU-second, so it ignores the meter.
+pub fn build_from_env_with_meter(
+    meter: Arc<crate::toxicity::cost_meter::ScanCostMeter>,
+) -> Result<Arc<dyn ToxicityClassifier>> {
     let kind = std::env::var("CHARCOAL_CLASSIFIER")
         .ok()
         .map(|s| s.trim().to_lowercase())
@@ -185,7 +197,6 @@ pub fn build_from_env() -> Result<Arc<dyn ToxicityClassifier>> {
                 .context("RUNPOD_ENDPOINT_URL must be set for CHARCOAL_CLASSIFIER=runpod")?;
             let api_key = std::env::var("RUNPOD_API_KEY")
                 .context("RUNPOD_API_KEY must be set for CHARCOAL_CLASSIFIER=runpod")?;
-            let meter = std::sync::Arc::new(crate::toxicity::cost_meter::ScanCostMeter::from_env());
             let client = crate::toxicity::runpod_cope_b::RunPodCopeBClient::new(endpoint, api_key)?
                 .with_meter(meter);
             Ok(Arc::new(client))
