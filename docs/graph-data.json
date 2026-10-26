@@ -13012,6 +13012,17 @@
       "created_at": "2026-10-25T18:26:10.940818-07:00",
       "updated_at": "2026-10-25T18:26:10.940818-07:00",
       "metadata_json": "{\"branch\":\"feat/411-runpod-balance-check\",\"commit\":\"4af7ab8\",\"confidence\":90,\"files\":[\"tools/runpod-balance/check_balance.py\",\"tools/runpod-balance/install.sh\"]}"
+    },
+    {
+      "id": 1193,
+      "change_id": "0bb8aa5a-d6a4-42e2-99d7-8433a04a06ee",
+      "node_type": "outcome",
+      "title": "Codex 6 findings on #411 fixed (strict parsing, delivery never silent, plistlib, sync first run); 16 tests pass",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-25T18:29:34.090642-07:00",
+      "updated_at": "2026-10-25T18:29:34.090642-07:00",
+      "metadata_json": "{\"branch\":\"feat/411-runpod-balance-check\",\"commit\":\"2515960\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -26621,6 +26632,17 @@
       "weight": 1.0,
       "rationale": "Implements decision",
       "created_at": "2026-10-25T18:26:14.799045-07:00"
+    },
+    {
+      "id": 1248,
+      "from_node_id": 1192,
+      "to_node_id": 1193,
+      "from_change_id": "cdb70452-7150-4fa0-ac92-2fcf05e6e838",
+      "to_change_id": "0bb8aa5a-d6a4-42e2-99d7-8433a04a06ee",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review fixes",
+      "created_at": "2026-10-25T18:29:40.439106-07:00"
     }
   ],
   "documents": [

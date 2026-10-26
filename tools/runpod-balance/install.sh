@@ -19,6 +19,14 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 TOPIC="${1:-}"
 PY="$(command -v python3)"
 
+# ntfy accepts letters, digits, '_' and '-', up to 64 chars. Reject anything
+# else now: a bad topic would fail every phone push while the Mac
+# notification still "delivers", so nothing would flag it.
+if [ -n "$TOPIC" ] && ! [[ "$TOPIC" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
+  echo "Invalid ntfy topic '$TOPIC': use only letters, digits, '_' or '-' (max 64)." >&2
+  exit 1
+fi
+
 if ! security find-generic-password -s charcoal-runpod-billing >/dev/null 2>&1; then
   echo "No Keychain item 'charcoal-runpod-billing'. Add the key first:" >&2
   echo "  security add-generic-password -s charcoal-runpod-billing -a runpod -w" >&2

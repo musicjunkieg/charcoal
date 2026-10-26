@@ -67,6 +67,47 @@ class DeliveryTests(unittest.TestCase):
         finally:
             cb.LOG_PATH = orig
 
+    def test_log_never_raises_when_stdout_is_broken(self):
+        orig_stdout, orig_stderr = sys.stdout, sys.stderr
+
+        class Broken:
+            def write(self, _):
+                raise OSError("broken pipe")
+
+            def flush(self):
+                raise OSError("broken pipe")
+
+        sys.stdout = sys.stderr = Broken()
+        orig = cb.LOG_PATH
+        cb.LOG_PATH = "/nonexistent-root-dir/charcoal/x.log"
+        try:
+            cb.log("line")  # must not raise even with every stream broken
+        finally:
+            sys.stdout, sys.stderr = orig_stdout, orig_stderr
+            cb.LOG_PATH = orig
+
+    def test_non_finite_threshold_config_fails_the_check_loudly(self):
+        # CHARCOAL_MAX_DAILY_SPEND_USD=nan would make every comparison false.
+        sent = []
+        orig_notify, orig_log = cb.notify, cb.LOG_PATH
+        orig_key, orig_req = cb.read_api_key, cb._request
+
+        def no_network(*_a, **_k):
+            raise AssertionError("bad config must fail before any API call")
+
+        cb.notify = lambda t, m: sent.append(t) or True
+        cb.read_api_key = lambda: "k"
+        cb._request = no_network
+        cb.LOG_PATH = "/nonexistent-root-dir/charcoal/x.log"
+        os.environ["CHARCOAL_MAX_DAILY_SPEND_USD"] = "nan"
+        try:
+            self.assertEqual(cb.main(), 2)
+            self.assertEqual(sent, ["Charcoal: RunPod check failed"])
+        finally:
+            del os.environ["CHARCOAL_MAX_DAILY_SPEND_USD"]
+            cb.notify, cb.LOG_PATH = orig_notify, orig_log
+            cb.read_api_key, cb._request = orig_key, orig_req
+
     def test_notify_reports_failure_when_no_channel_delivers(self):
         orig_run = cb.subprocess.run
         cb.subprocess.run = lambda *a, **k: cb.subprocess.CompletedProcess(a, 1, "", "err")

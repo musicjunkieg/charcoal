@@ -17,8 +17,16 @@ second line, and it also catches a *spike* while the balance still looks fine.
 "Yesterday" is the last complete **UTC** day in RunPod's billing, which ends
 at 5 PM PT (4 PM in winter).
 
-If the check itself fails — key rejected, network down — it notifies too, so
-silence always means a healthy reading.
+If the check itself fails — key rejected, network down, a malformed reply —
+it notifies too. Silence means healthy **only while notifications work**: if
+every channel fails, the run exits 2 and the only trace is the log. Glance at
+the log now and then; a missing or `CHECK FAILED` line is the tell.
+
+**Known expiry:** the live balance comes from RunPod's GraphQL API, which
+RunPod plans to retire in early 2027; REST v2 has no balance route yet. When
+GraphQL goes away the check fails loudly (it never reads as $0). Move the
+balance read to whatever replaces it then; the daily-spend half already
+uses REST v2.
 
 ## Install
 

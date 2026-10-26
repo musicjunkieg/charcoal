@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2515960b3643d698c4e5a77401d311a1c1068cc6",
+    "short_hash": "2515960",
+    "author": "Bryan Guffey",
+    "date": "2026-10-25T18:29:26-07:00",
+    "message": "fix(411): no silent failures in the balance check\n\nCodex review: malformed or non-finite amounts now fail the check instead\nof reading as $0; unexpected response shapes raise CheckError; an\nunwritable log never blocks a notification; notify tries every channel\nand exits 2 if none delivered; the plist is built with plistlib (escaped);\ninstall runs the first check synchronously and reports its real result.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
     "hash": "4af7ab8b2fd24ff30f266f015d112f7a012f1b81",
     "short_hash": "4af7ab8",
     "author": "Bryan Guffey",

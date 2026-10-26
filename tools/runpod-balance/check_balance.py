@@ -50,9 +50,9 @@ def _usd(value, name):
     try:
         amount = float(value)
     except (TypeError, ValueError):
-        raise CheckError(f"RunPod {name} is not a number: {value!r}") from None
+        raise CheckError(f"{name} is not a number: {value!r}") from None
     if not math.isfinite(amount):
-        raise CheckError(f"RunPod {name} is not finite: {value!r}")
+        raise CheckError(f"{name} is not finite: {value!r}")
     return amount
 
 
@@ -66,8 +66,8 @@ def parse_myself(body):
     me = data.get("myself") if isinstance(data, dict) else None
     if not isinstance(me, dict):
         raise CheckError("RunPod returned no account data")
-    return (_usd(me.get("clientBalance"), "balance"),
-            _usd(me.get("currentSpendPerHr"), "spend per hour"))
+    return (_usd(me.get("clientBalance"), "RunPod balance"),
+            _usd(me.get("currentSpendPerHr"), "RunPod spend per hour"))
 
 
 def parse_yesterday_spend(body):
@@ -83,7 +83,7 @@ def parse_yesterday_spend(body):
     start = day.get("startTime") if isinstance(day, dict) else None
     if not isinstance(start, str) or len(start) < 10:
         raise CheckError("RunPod billing bucket has no start time")
-    return start[:10], _usd(day.get("totalAmount"), "daily spend")
+    return start[:10], _usd(day.get("totalAmount"), "RunPod daily spend")
 
 
 def evaluate(balance, yesterday_spend, spend_per_hr,
@@ -173,19 +173,31 @@ def log(line):
     """Append to the log file and print. Never raises: an unwritable log must
     not stop the notification that follows it."""
     stamp = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-    print(f"{stamp} {line}", flush=True)
+    _emit(f"{stamp} {line}", sys.stdout)
     try:
         os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
         with open(LOG_PATH, "a", encoding="utf-8") as f:
             f.write(f"{stamp} {line}\n")
     except OSError as e:
-        print(f"{stamp} could not write {LOG_PATH}: {e}", file=sys.stderr, flush=True)
+        _emit(f"{stamp} could not write {LOG_PATH}: {e}", sys.stderr)
+
+
+def _emit(text, stream):
+    """Print, swallowing a broken stream (launchd may have none)."""
+    try:
+        print(text, file=stream, flush=True)
+    except (OSError, ValueError):
+        pass
 
 
 def main():
     try:
-        min_balance = float(os.environ.get("CHARCOAL_MIN_BALANCE_USD", DEFAULT_MIN_BALANCE))
-        max_daily = float(os.environ.get("CHARCOAL_MAX_DAILY_SPEND_USD", DEFAULT_MAX_DAILY_SPEND))
+        # _usd rejects NaN/inf: a `nan` threshold would make every comparison
+        # false and report "ok" through a spike.
+        min_balance = _usd(os.environ.get("CHARCOAL_MIN_BALANCE_USD", DEFAULT_MIN_BALANCE),
+                           "CHARCOAL_MIN_BALANCE_USD setting")
+        max_daily = _usd(os.environ.get("CHARCOAL_MAX_DAILY_SPEND_USD", DEFAULT_MAX_DAILY_SPEND),
+                         "CHARCOAL_MAX_DAILY_SPEND_USD setting")
         key = read_api_key()
         balance, per_hr = parse_myself(_request(
             GRAPHQL_URL, key, {"query": "query { myself { clientBalance currentSpendPerHr } }"}))
