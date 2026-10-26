@@ -24,6 +24,7 @@ Stdlib only. Exit status: 0 ok, 1 alert raised, 2 the check itself failed
 """
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -43,14 +44,30 @@ class CheckError(Exception):
     """The check could not produce a trustworthy reading."""
 
 
+def _usd(value, name):
+    """A required, finite dollar amount. Missing, null, NaN or junk is an error,
+    never 0 — a malformed response must not read as a healthy account."""
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        raise CheckError(f"RunPod {name} is not a number: {value!r}") from None
+    if not math.isfinite(amount):
+        raise CheckError(f"RunPod {name} is not finite: {value!r}")
+    return amount
+
+
 def parse_myself(body):
     """GraphQL `myself` response -> (balance_usd, spend_per_hr_usd)."""
+    if not isinstance(body, dict):
+        raise CheckError("RunPod GraphQL response is not an object")
     if body.get("errors"):
-        raise CheckError(f"RunPod GraphQL error: {body['errors'][0].get('message', body['errors'])}")
-    me = (body.get("data") or {}).get("myself")
-    if not me or me.get("clientBalance") is None:
-        raise CheckError("RunPod returned no balance")
-    return float(me["clientBalance"]), float(me.get("currentSpendPerHr") or 0.0)
+        raise CheckError(f"RunPod GraphQL error: {str(body['errors'])[:200]}")
+    data = body.get("data")
+    me = data.get("myself") if isinstance(data, dict) else None
+    if not isinstance(me, dict):
+        raise CheckError("RunPod returned no account data")
+    return (_usd(me.get("clientBalance"), "balance"),
+            _usd(me.get("currentSpendPerHr"), "spend per hour"))
 
 
 def parse_yesterday_spend(body):
@@ -59,11 +76,14 @@ def parse_yesterday_spend(body):
     The last bucket is today, still in progress; the one before it is the
     most recent complete day.
     """
-    records = body.get("records") or []
-    if len(records) < 2:
-        raise CheckError(f"expected 2 daily billing buckets, got {len(records)}")
+    records = body.get("records") if isinstance(body, dict) else None
+    if not isinstance(records, list) or len(records) < 2:
+        raise CheckError("expected 2 daily billing buckets from RunPod")
     day = records[-2]
-    return day["startTime"][:10], float(day.get("totalAmount") or 0.0)
+    start = day.get("startTime") if isinstance(day, dict) else None
+    if not isinstance(start, str) or len(start) < 10:
+        raise CheckError("RunPod billing bucket has no start time")
+    return start[:10], _usd(day.get("totalAmount"), "daily spend")
 
 
 def evaluate(balance, yesterday_spend, spend_per_hr,
@@ -121,25 +141,45 @@ def _request(url, key, payload=None):
 
 
 def notify(title, message):
-    """macOS notification, plus an ntfy.sh push if a topic is configured."""
+    """macOS notification, plus an ntfy.sh push if a topic is configured.
+
+    Tries every channel and returns True if at least one delivered. A failed
+    channel is logged, never raised: one broken channel must not stop the other.
+    """
+    delivered = False
     script = f"display notification {json.dumps(message)} with title {json.dumps(title)}"
-    subprocess.run(["osascript", "-e", script], capture_output=True, check=False)
+    try:
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True,
+                           check=False, timeout=TIMEOUT_SECS)
+        if r.returncode == 0:
+            delivered = True
+        else:
+            log(f"macOS notification failed: {(r.stderr or '').strip()[:200]}")
+    except (subprocess.SubprocessError, OSError) as e:
+        log(f"macOS notification failed: {e}")
     topic = os.environ.get("CHARCOAL_ALERT_NTFY_TOPIC", "").strip()
     if topic:
         req = urllib.request.Request(f"https://ntfy.sh/{topic}", data=message.encode(),
                                      headers={"Title": title, "Priority": "high"})
         try:
             urllib.request.urlopen(req, timeout=TIMEOUT_SECS).close()
+            delivered = True
         except Exception as e:
             log(f"ntfy push failed: {e}")
+    return delivered
 
 
 def log(line):
+    """Append to the log file and print. Never raises: an unwritable log must
+    not stop the notification that follows it."""
     stamp = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-    os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
-    with open(LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(f"{stamp} {line}\n")
-    print(f"{stamp} {line}")
+    print(f"{stamp} {line}", flush=True)
+    try:
+        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"{stamp} {line}\n")
+    except OSError as e:
+        print(f"{stamp} could not write {LOG_PATH}: {e}", file=sys.stderr, flush=True)
 
 
 def main():
@@ -152,13 +192,16 @@ def main():
         day, spent = parse_yesterday_spend(_request(BILLING_URL, key))
     except (CheckError, ValueError) as e:
         log(f"CHECK FAILED: {e}")
-        notify("Charcoal: RunPod check failed", str(e))
+        if not notify("Charcoal: RunPod check failed", str(e)):
+            log("NO NOTIFICATION CHANNEL DELIVERED")
         return 2
 
     alerts = evaluate(balance, spent, per_hr, min_balance, max_daily)
     log(summary_line(balance, day, spent, per_hr) + (" ALERT" if alerts else " ok"))
-    for a in alerts:
-        notify("Charcoal: RunPod alert", a)
+    undelivered = [a for a in alerts if not notify("Charcoal: RunPod alert", a)]
+    if undelivered:
+        log("NO NOTIFICATION CHANNEL DELIVERED")
+        return 2
     return 1 if alerts else 0
 
 

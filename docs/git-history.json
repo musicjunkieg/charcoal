@@ -1,5 +1,13 @@
 [
   {
+    "hash": "4af7ab8b2fd24ff30f266f015d112f7a012f1b81",
+    "short_hash": "4af7ab8",
+    "author": "Bryan Guffey",
+    "date": "2026-10-25T18:26:03-07:00",
+    "message": "feat(411): daily RunPod balance and spend check from the Mac\n\nAuto-pay is off, so the prepaid balance caps runaway spend. A launchd job\nreads the live balance (GraphQL myself) and yesterday's spend\n(/v2/billing) with a Keychain-held key that never goes near Railway, and\nalerts below $25 or above $10/day. A failed check alerts too.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 6
+  },
+  {
     "hash": "d0082889c9131f4089deac9e5af665c57aee29e6",
     "short_hash": "d008288",
     "author": "Bryan Guffey",

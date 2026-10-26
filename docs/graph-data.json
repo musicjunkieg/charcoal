@@ -13001,6 +13001,17 @@
       "created_at": "2026-10-25T18:24:24.449872-07:00",
       "updated_at": "2026-10-25T18:24:24.449872-07:00",
       "metadata_json": "{\"branch\":\"feat/411-runpod-balance-check\",\"confidence\":85}"
+    },
+    {
+      "id": 1192,
+      "change_id": "cdb70452-7150-4fa0-ac92-2fcf05e6e838",
+      "node_type": "action",
+      "title": "Build tools/runpod-balance daily check (launchd, Keychain key, ntfy optional)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-25T18:26:10.940818-07:00",
+      "updated_at": "2026-10-25T18:26:10.940818-07:00",
+      "metadata_json": "{\"branch\":\"feat/411-runpod-balance-check\",\"commit\":\"4af7ab8\",\"confidence\":90,\"files\":[\"tools/runpod-balance/check_balance.py\",\"tools/runpod-balance/install.sh\"]}"
     }
   ],
   "edges": [
@@ -26599,6 +26610,17 @@
       "weight": 1.0,
       "rationale": "rejected",
       "created_at": "2026-10-25T18:24:28.103375-07:00"
+    },
+    {
+      "id": 1247,
+      "from_node_id": 1191,
+      "to_node_id": 1192,
+      "from_change_id": "7c68a36b-7fb5-45bc-aac9-82d808cb2396",
+      "to_change_id": "cdb70452-7150-4fa0-ac92-2fcf05e6e838",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implements decision",
+      "created_at": "2026-10-25T18:26:14.799045-07:00"
     }
   ],
   "documents": [

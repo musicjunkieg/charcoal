@@ -36,6 +36,55 @@ class ParseTests(unittest.TestCase):
         with self.assertRaises(cb.CheckError):
             cb.parse_yesterday_spend({"records": []})
 
+    def test_missing_null_or_non_finite_amounts_raise_instead_of_reading_as_zero(self):
+        # Codex: a malformed response must never log "ok".
+        today = {"startTime": "2026-10-25T00:00:00Z", "totalAmount": 0.0}
+        for bad in ({}, {"totalAmount": None}, {"totalAmount": float("nan")},
+                    {"totalAmount": "inf"}, {"totalAmount": "x"}):
+            day = {"startTime": "2026-10-24T00:00:00Z", **bad}
+            with self.assertRaises(cb.CheckError, msg=bad):
+                cb.parse_yesterday_spend({"records": [day, today]})
+        for bad in (None, float("nan"), "x"):
+            with self.assertRaises(cb.CheckError, msg=bad):
+                cb.parse_myself({"data": {"myself": {"clientBalance": bad, "currentSpendPerHr": 0}}})
+
+    def test_unexpected_shapes_raise_check_error(self):
+        for body in ([], "nope", {"errors": "boom"}, {"data": []}):
+            with self.assertRaises(cb.CheckError, msg=body):
+                cb.parse_myself(body)
+        for body in ([], {"records": "x"}, {"records": [1, 2]}, {"records": [{}, {}]}):
+            with self.assertRaises(cb.CheckError, msg=body):
+                cb.parse_yesterday_spend(body)
+
+
+class DeliveryTests(unittest.TestCase):
+    def test_log_never_raises_when_the_file_cannot_be_written(self):
+        # A logging failure must not stop the alert that follows it.
+        orig = cb.LOG_PATH
+        cb.LOG_PATH = "/nonexistent-root-dir/charcoal/x.log"
+        try:
+            cb.log("line")  # must not raise
+        finally:
+            cb.LOG_PATH = orig
+
+    def test_notify_reports_failure_when_no_channel_delivers(self):
+        orig_run = cb.subprocess.run
+        cb.subprocess.run = lambda *a, **k: cb.subprocess.CompletedProcess(a, 1, "", "err")
+        os.environ.pop("CHARCOAL_ALERT_NTFY_TOPIC", None)
+        try:
+            self.assertFalse(cb.notify("t", "m"))
+        finally:
+            cb.subprocess.run = orig_run
+
+    def test_notify_succeeds_when_osascript_does(self):
+        orig_run = cb.subprocess.run
+        cb.subprocess.run = lambda *a, **k: cb.subprocess.CompletedProcess(a, 0, "", "")
+        os.environ.pop("CHARCOAL_ALERT_NTFY_TOPIC", None)
+        try:
+            self.assertTrue(cb.notify("t", "m"))
+        finally:
+            cb.subprocess.run = orig_run
+
 
 class EvaluateTests(unittest.TestCase):
     def test_healthy_account_raises_no_alerts(self):
