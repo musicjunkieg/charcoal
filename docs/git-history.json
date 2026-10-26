@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d0082889c9131f4089deac9e5af665c57aee29e6",
+    "short_hash": "d008288",
+    "author": "Bryan Guffey",
+    "date": "2026-10-25T03:10:05-07:00",
+    "message": "Merge pull request #149 from musicjunkieg/feat/393-scan-cost-ledger\n\nfeat(393): per-scan GPU cost ledger and admin cost view",
+    "files_changed": 0
+  },
+  {
     "hash": "49d61316922554df9c9b642b091c1536ce4587ab",
     "short_hash": "49d6131",
     "author": "Bryan Guffey",

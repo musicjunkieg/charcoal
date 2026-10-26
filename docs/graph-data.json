@@ -12935,6 +12935,72 @@
       "created_at": "2026-10-25T01:34:00.162315-07:00",
       "updated_at": "2026-10-25T01:34:00.162315-07:00",
       "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"commit\":\"49d6131\",\"confidence\":90,\"files\":[\"src/toxicity/cost_meter.rs\",\"tests/unit_cost_meter.rs\"]}"
+    },
+    {
+      "id": 1186,
+      "change_id": "ca01fb0c-bcc9-42be-9c3b-a061c0833d95",
+      "node_type": "outcome",
+      "title": "PR #149 merged to staging (CodeRabbit approved, CI green)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-25T03:10:11.550581-07:00",
+      "updated_at": "2026-10-25T03:10:11.550581-07:00",
+      "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"commit\":\"d008288\",\"confidence\":95}"
+    },
+    {
+      "id": 1187,
+      "change_id": "f50bc0aa-8c68-43e6-83ad-299a9d1fd0ad",
+      "node_type": "observation",
+      "title": "Staging v20 applied, scan_costs empty; first rows expected at next 24h refresh tick ~03:58 UTC 2026-10-26",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-25T03:17:57.861103-07:00",
+      "updated_at": "2026-10-25T03:17:57.861103-07:00",
+      "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"commit\":\"d008288\",\"confidence\":90}"
+    },
+    {
+      "id": 1188,
+      "change_id": "d94dd4b9-db84-43c0-8c98-46cb4307e25c",
+      "node_type": "goal",
+      "title": "Daily RunPod balance check from the Mac",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-25T18:24:17.404901-07:00",
+      "updated_at": "2026-10-25T18:24:17.404901-07:00",
+      "metadata_json": "{\"branch\":\"feat/411-runpod-balance-check\",\"confidence\":90,\"prompt\":\"but do the daily balance check anyway\"}"
+    },
+    {
+      "id": 1189,
+      "change_id": "21f8974c-c013-48e9-8bca-f5267e7d749f",
+      "node_type": "option",
+      "title": "Mac launchd job: GraphQL myself balance + /v2/billing daily spend, notify locally (+ optional ntfy push)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-25T18:24:24.429709-07:00",
+      "updated_at": "2026-10-25T18:24:24.429709-07:00",
+      "metadata_json": "{\"branch\":\"feat/411-runpod-balance-check\",\"confidence\":85}"
+    },
+    {
+      "id": 1190,
+      "change_id": "4440b9b5-7024-43b1-83b4-d807ce2cb90d",
+      "node_type": "option",
+      "title": "In-app watcher on Railway",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-25T18:24:24.440118-07:00",
+      "updated_at": "2026-10-25T18:24:24.440118-07:00",
+      "metadata_json": "{\"branch\":\"feat/411-runpod-balance-check\",\"confidence\":30}"
+    },
+    {
+      "id": 1191,
+      "change_id": "7c68a36b-7fb5-45bc-aac9-82d808cb2396",
+      "node_type": "decision",
+      "title": "Mac launchd job; full-access key in macOS Keychain, never Railway; alert < $25 balance or > $10/day spend",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-25T18:24:24.449872-07:00",
+      "updated_at": "2026-10-25T18:24:24.449872-07:00",
+      "metadata_json": "{\"branch\":\"feat/411-runpod-balance-check\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -26456,6 +26522,83 @@
       "weight": 1.0,
       "rationale": "CodeRabbit fix on the PR",
       "created_at": "2026-10-25T01:34:00.260189-07:00"
+    },
+    {
+      "id": 1240,
+      "from_node_id": 1183,
+      "to_node_id": 1186,
+      "from_change_id": "18f02fb2-21f8-49a7-9fbd-303953531729",
+      "to_change_id": "ca01fb0c-bcc9-42be-9c3b-a061c0833d95",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR merged",
+      "created_at": "2026-10-25T03:10:14.793954-07:00"
+    },
+    {
+      "id": 1241,
+      "from_node_id": 1185,
+      "to_node_id": 1186,
+      "from_change_id": "06df5842-6fc0-4a33-84ad-0ff26f4f5173",
+      "to_change_id": "ca01fb0c-bcc9-42be-9c3b-a061c0833d95",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix included",
+      "created_at": "2026-10-25T03:10:14.802181-07:00"
+    },
+    {
+      "id": 1242,
+      "from_node_id": 1186,
+      "to_node_id": 1187,
+      "from_change_id": "ca01fb0c-bcc9-42be-9c3b-a061c0833d95",
+      "to_change_id": "f50bc0aa-8c68-43e6-83ad-299a9d1fd0ad",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Post-merge staging check",
+      "created_at": "2026-10-25T03:18:00.885750-07:00"
+    },
+    {
+      "id": 1243,
+      "from_node_id": 1188,
+      "to_node_id": 1189,
+      "from_change_id": "d94dd4b9-db84-43c0-8c98-46cb4307e25c",
+      "to_change_id": "21f8974c-c013-48e9-8bca-f5267e7d749f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-10-25T18:24:28.083658-07:00"
+    },
+    {
+      "id": 1244,
+      "from_node_id": 1188,
+      "to_node_id": 1190,
+      "from_change_id": "d94dd4b9-db84-43c0-8c98-46cb4307e25c",
+      "to_change_id": "4440b9b5-7024-43b1-83b4-d807ce2cb90d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option (rejected: needs billing key in Railway, the breached place)",
+      "created_at": "2026-10-25T18:24:28.091074-07:00"
+    },
+    {
+      "id": 1245,
+      "from_node_id": 1189,
+      "to_node_id": 1191,
+      "from_change_id": "21f8974c-c013-48e9-8bca-f5267e7d749f",
+      "to_change_id": "7c68a36b-7fb5-45bc-aac9-82d808cb2396",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen",
+      "created_at": "2026-10-25T18:24:28.096906-07:00"
+    },
+    {
+      "id": 1246,
+      "from_node_id": 1190,
+      "to_node_id": 1191,
+      "from_change_id": "4440b9b5-7024-43b1-83b4-d807ce2cb90d",
+      "to_change_id": "7c68a36b-7fb5-45bc-aac9-82d808cb2396",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected",
+      "created_at": "2026-10-25T18:24:28.103375-07:00"
     }
   ],
   "documents": [
