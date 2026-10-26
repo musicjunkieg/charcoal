@@ -39,7 +39,7 @@ class ParseTests(unittest.TestCase):
     def test_missing_null_or_non_finite_amounts_raise_instead_of_reading_as_zero(self):
         # Codex: a malformed response must never log "ok".
         today = {"startTime": "2026-10-25T00:00:00Z", "totalAmount": 0.0}
-        for bad in ({}, {"totalAmount": None}, {"totalAmount": float("nan")},
+        for bad in ({}, {"totalAmount": None}, {"totalAmount": float("nan")}, {"totalAmount": False},
                     {"totalAmount": "inf"}, {"totalAmount": "x"}):
             day = {"startTime": "2026-10-24T00:00:00Z", **bad}
             with self.assertRaises(cb.CheckError, msg=bad):
@@ -99,12 +99,16 @@ class DeliveryTests(unittest.TestCase):
         cb.read_api_key = lambda: "k"
         cb._request = no_network
         cb.LOG_PATH = "/nonexistent-root-dir/charcoal/x.log"
-        os.environ["CHARCOAL_MAX_DAILY_SPEND_USD"] = "nan"
         try:
-            self.assertEqual(cb.main(), 2)
-            self.assertEqual(sent, ["Charcoal: RunPod check failed"])
+            # nan disables every comparison; a negative threshold is equally
+            # meaningless (a balance can never be "below -5").
+            for bad in ("nan", "-5", "true"):
+                sent.clear()
+                os.environ["CHARCOAL_MAX_DAILY_SPEND_USD"] = bad
+                self.assertEqual(cb.main(), 2, bad)
+                self.assertEqual(sent, ["Charcoal: RunPod check failed"], bad)
         finally:
-            del os.environ["CHARCOAL_MAX_DAILY_SPEND_USD"]
+            os.environ.pop("CHARCOAL_MAX_DAILY_SPEND_USD", None)
             cb.notify, cb.LOG_PATH = orig_notify, orig_log
             cb.read_api_key, cb._request = orig_key, orig_req
 

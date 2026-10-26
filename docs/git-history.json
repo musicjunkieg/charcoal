@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d2b1104d0fd73954623811979cc23825748f6e6e",
+    "short_hash": "d2b1104",
+    "author": "Bryan Guffey",
+    "date": "2026-10-25T18:40:17-07:00",
+    "message": "fix(411): CodeRabbit — broken streams, nan thresholds, topic check\n\nA broken stdout/stderr can no longer stop a notification; NaN/inf\nthreshold settings fail the check loudly; the installer rejects an\ninvalid ntfy topic; the README no longer claims silence proves health\nand notes the early-2027 GraphQL retirement (check fails loudly then).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 6
+  },
+  {
     "hash": "2515960b3643d698c4e5a77401d311a1c1068cc6",
     "short_hash": "2515960",
     "author": "Bryan Guffey",

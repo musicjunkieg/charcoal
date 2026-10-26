@@ -46,13 +46,25 @@ class CheckError(Exception):
 
 def _usd(value, name):
     """A required, finite dollar amount. Missing, null, NaN or junk is an error,
-    never 0 — a malformed response must not read as a healthy account."""
+    never 0 — a malformed response must not read as a healthy account.
+    Booleans are rejected too: float(False) is 0.0."""
+    if isinstance(value, bool):
+        raise CheckError(f"{name} is not a number: {value!r}")
     try:
         amount = float(value)
     except (TypeError, ValueError):
         raise CheckError(f"{name} is not a number: {value!r}") from None
     if not math.isfinite(amount):
         raise CheckError(f"{name} is not finite: {value!r}")
+    return amount
+
+
+def _threshold(env_name, default):
+    """A finite, non-negative threshold from the environment. A negative one
+    is as meaningless as NaN: a balance can never be "below -5"."""
+    amount = _usd(os.environ.get(env_name, default), f"{env_name} setting")
+    if amount < 0:
+        raise CheckError(f"{env_name} setting must not be negative: {amount}")
     return amount
 
 
@@ -192,12 +204,10 @@ def _emit(text, stream):
 
 def main():
     try:
-        # _usd rejects NaN/inf: a `nan` threshold would make every comparison
-        # false and report "ok" through a spike.
-        min_balance = _usd(os.environ.get("CHARCOAL_MIN_BALANCE_USD", DEFAULT_MIN_BALANCE),
-                           "CHARCOAL_MIN_BALANCE_USD setting")
-        max_daily = _usd(os.environ.get("CHARCOAL_MAX_DAILY_SPEND_USD", DEFAULT_MAX_DAILY_SPEND),
-                         "CHARCOAL_MAX_DAILY_SPEND_USD setting")
+        # A `nan` threshold would make every comparison false and report "ok"
+        # through a spike; _threshold rejects it (and negatives) loudly.
+        min_balance = _threshold("CHARCOAL_MIN_BALANCE_USD", DEFAULT_MIN_BALANCE)
+        max_daily = _threshold("CHARCOAL_MAX_DAILY_SPEND_USD", DEFAULT_MAX_DAILY_SPEND)
         key = read_api_key()
         balance, per_hr = parse_myself(_request(
             GRAPHQL_URL, key, {"query": "query { myself { clientBalance currentSpendPerHr } }"}))
