@@ -37,7 +37,7 @@ mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 
 # plistlib writes valid, escaped XML whatever the paths or topic contain.
 "$PY" - "$PLIST" "$LABEL" "$PY" "$SCRIPT" "$HOME/Library/Logs/charcoal-runpod-balance.out" "$TOPIC" <<'PY_EOF'
-import plistlib, sys
+import os, plistlib, sys
 plist, label, py, script, out, topic = sys.argv[1:7]
 job = {
     "Label": label,
@@ -46,8 +46,39 @@ job = {
     "StandardOutPath": out,
     "StandardErrorPath": out,
 }
+# launchd does not inherit this shell's environment, so a threshold override
+# must be written into the job. An override exported now wins; otherwise keep
+# the one from the previous install, so reinstalling to change one threshold
+# does not silently reset the other to its default.
+previous = {}
+try:
+    with open(plist, "rb") as f:
+        previous = plistlib.load(f).get("EnvironmentVariables", {})
+except (OSError, plistlib.InvalidFileException):
+    pass
+env = {}
 if topic:
-    job["EnvironmentVariables"] = {"CHARCOAL_ALERT_NTFY_TOPIC": topic}
+    env["CHARCOAL_ALERT_NTFY_TOPIC"] = topic
+for name in ("CHARCOAL_MIN_BALANCE_USD", "CHARCOAL_MAX_DAILY_SPEND_USD"):
+    value = os.environ.get(name, "").strip() or str(previous.get(name, "")).strip()
+    if value:  # unset and empty (NAME=) both mean "use the default"
+        env[name] = value
+        print(f"  {name}={value}")
+# Validate with the checker's own rules BEFORE replacing the job: a bad value
+# (nan, -5, junk) must leave the existing job untouched, not install one that
+# fails every day.
+sys.path.insert(0, os.path.dirname(script))
+import check_balance as cb
+for name in ("CHARCOAL_MIN_BALANCE_USD", "CHARCOAL_MAX_DAILY_SPEND_USD"):
+    os.environ.pop(name, None)
+    if name in env:
+        os.environ[name] = env[name]
+    try:
+        cb._threshold(name, 0)
+    except cb.CheckError as e:
+        sys.exit(f"Not installed: {e}")
+if env:
+    job["EnvironmentVariables"] = env
 with open(plist, "wb") as f:
     plistlib.dump(job, f)
 PY_EOF
@@ -57,9 +88,21 @@ launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "Installed $LABEL (daily 9:00 AM). Running the first check now:"
 
-# Run it synchronously (not via kickstart) so the result shown is THIS run's.
+# Run it synchronously (not via kickstart) so the result shown is THIS run's,
+# with the job's environment, not this shell's: launchd gives a job little
+# more than HOME/USER/PATH plus the plist's variables. Anything else (say a
+# RUNPOD_BILLING_API_KEY exported here) would make the first check pass where
+# the daily job would fail.
 set +e
-CHARCOAL_ALERT_NTFY_TOPIC="$TOPIC" "$PY" "$SCRIPT"
+"$PY" - "$PLIST" "$PY" "$SCRIPT" <<'PY_EOF'
+import os, plistlib, subprocess, sys
+plist, py, script = sys.argv[1:4]
+env = {k: os.environ[k] for k in ("HOME", "USER", "LOGNAME", "TMPDIR") if k in os.environ}
+env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+with open(plist, "rb") as f:
+    env.update(plistlib.load(f).get("EnvironmentVariables", {}))
+sys.exit(subprocess.run([py, script], env=env).returncode)
+PY_EOF
 rc=$?
 set -e
 case $rc in

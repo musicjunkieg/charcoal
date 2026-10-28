@@ -3,6 +3,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -58,6 +59,22 @@ class ParseTests(unittest.TestCase):
 
 
 class DeliveryTests(unittest.TestCase):
+    def setUp(self):
+        # notify() logs channel failures; keep them out of the real log the
+        # operator reads on the Mac mini.
+        orig = cb.LOG_PATH
+        tmp = tempfile.TemporaryDirectory()
+        cb.LOG_PATH = os.path.join(tmp.name, "test.log")
+        self.addCleanup(setattr, cb, "LOG_PATH", orig)
+        self.addCleanup(tmp.cleanup)
+
+    def test_delivery_tests_never_point_at_the_real_log(self):
+        # Guards setUp itself: reading back the log would pass even against
+        # the real file, so assert the path that is actually in use.
+        real = os.path.expanduser("~/Library/Logs/charcoal-runpod-balance.log")
+        self.assertNotEqual(os.path.realpath(cb.LOG_PATH), os.path.realpath(real))
+        self.assertTrue(cb.LOG_PATH.startswith(tempfile.gettempdir()))
+
     def test_log_never_raises_when_the_file_cannot_be_written(self):
         # A logging failure must not stop the alert that follows it.
         orig = cb.LOG_PATH
@@ -111,6 +128,16 @@ class DeliveryTests(unittest.TestCase):
             os.environ.pop("CHARCOAL_MAX_DAILY_SPEND_USD", None)
             cb.notify, cb.LOG_PATH = orig_notify, orig_log
             cb.read_api_key, cb._request = orig_key, orig_req
+
+    def test_empty_threshold_setting_means_the_default(self):
+        # The installer drops NAME= from the daily job; the check must read it
+        # the same way so the first run and the job agree.
+        for blank in ("", "   "):
+            os.environ["CHARCOAL_MIN_BALANCE_USD"] = blank
+            try:
+                self.assertEqual(cb._threshold("CHARCOAL_MIN_BALANCE_USD", 25.0), 25.0)
+            finally:
+                os.environ.pop("CHARCOAL_MIN_BALANCE_USD", None)
 
     def test_notify_reports_failure_when_no_channel_delivers(self):
         orig_run = cb.subprocess.run

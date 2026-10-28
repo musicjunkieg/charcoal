@@ -49,6 +49,16 @@ uses REST v2.
 It runs daily at 9:00 AM PT (or on wake, if the Mac was asleep) and once
 immediately on install.
 
+To change a threshold, export it when you run the installer
+(`CHARCOAL_MIN_BALANCE_USD=40 tools/runpod-balance/install.sh <topic>`); the
+installer copies it into the daily job and prints the overrides in effect.
+Re-running the installer keeps any override you don't set again, so you can
+change one threshold at a time. To go back to the defaults, uninstall (below),
+run `unset CHARCOAL_MIN_BALANCE_USD CHARCOAL_MAX_DAILY_SPEND_USD` so nothing
+exported is copied back in, and install again. A threshold the checker would
+reject (`nan`, a negative, junk) stops the install and leaves the existing job
+as it was.
+
 ## Reading it
 
 Every run appends one line to `~/Library/Logs/charcoal-runpod-balance.log`:
