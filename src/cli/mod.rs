@@ -4,3 +4,4 @@
 
 pub mod classify_compare;
 pub mod classify_gate;
+pub mod eval_classifiers;

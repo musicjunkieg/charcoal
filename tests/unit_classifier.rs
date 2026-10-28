@@ -388,6 +388,27 @@ mod factory {
             c.err()
         );
     }
+
+    /// #393: the scan must hold the SAME meter the client bills into, or it
+    /// cannot read the scan's cost afterwards.
+    #[test]
+    #[serial(charcoal_classifier_env)]
+    fn build_from_env_with_meter_meters_through_the_given_meter() {
+        let _g = EnvGuard::new();
+        let _r = RunPodEnvGuard::new();
+        std::env::set_var("CHARCOAL_CLASSIFIER", "runpod");
+        std::env::set_var("RUNPOD_ENDPOINT_URL", "https://example.invalid/v2/x");
+        std::env::set_var("RUNPOD_API_KEY", "k");
+        let meter =
+            std::sync::Arc::new(charcoal::toxicity::cost_meter::ScanCostMeter::new(500, 329));
+        let c = charcoal::toxicity::classifier::build_from_env_with_meter(std::sync::Arc::clone(
+            &meter,
+        ))
+        .expect("runpod backend builds");
+        assert_eq!(c.name(), "runpod-cope-b");
+        // The caller's handle is the client's meter: two strong refs now exist.
+        assert_eq!(std::sync::Arc::strong_count(&meter), 2);
+    }
 }
 
 mod retry {

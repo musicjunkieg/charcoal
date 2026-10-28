@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- #393 — every full scan and nightly refresh records its estimated GPU cost
+  in a new `scan_costs` table (schema v20), success or failure, and logs a
+  one-line summary. The admin page shows per-user full-scan, refresh and
+  total cost plus 7- and 30-day totals, and flags any user whose full-scan
+  cost to date is over the $2.00 onboarding target. The figure is the app's own meter — a lower bound
+  that excludes the idle time RunPod bills per worker — and is labelled so.
+  A scan refused by the Stage-2 identity probe still records what it spent.
+- #404 — `charcoal eval-classifiers`: compares classifiers (today CoPE-B and
+  Detoxify; Jev, Clef and Strands Decider follow in Part B) on the same posts.
+  Headline false-alarm and miss rates come from a fixed hash-chosen holdout;
+  "better" or "worse" is decided per class by an exact paired test on the
+  posts where the models disagreed, and only with at least 20 paired labels
+  and 90 % coverage in that class — otherwise the report says why there is
+  no verdict yet. Disagreement-picked labels are reported separately, never as
+  rates, and a label's stream is derived from the post id, not the file.
+  Every model is scored on its own yes/no answer. Backends must pass an
+  identity check, and verdicts from an unexpected model or policy are errors;
+  only verdicts current for the pool's text and the model's identity are
+  reported. Unpriced models are refused; CoPE-B's spend is bounded by the
+  RunPod client's real cost meter at the run's $1 default cap, and a CoPE-B
+  run refuses to start without `CHARCOAL_COPE_B_POLICY_VERSION`.
+
 ### Changed
 - #344 — `charcoal migrate` copies every score row verbatim
   (`export_scores` / `import_score`), including expired, legacy and
@@ -99,6 +122,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   failed sweep warns and lets the scan continue.
 
 ### Fixed
+- #408 — after `CHARCOAL_TOKEN_KEY` is rotated, a stored Bluesky connection
+  sealed under the old key now reads as "not connected" (status and the
+  action runner alike) instead of showing as connected while every mute/block
+  failed with a crypto error. Reconnecting overwrites it. The row is kept, not
+  deleted, so restoring a mistakenly changed key brings sessions back. This
+  replaces the planned reset banner: the 2026-10-24 rotation (#406) found 0
+  sessions on prod and 1 on staging, revoked by hand.
 - #387 — a refresh that keeps failing for the same reason no longer retries
   every hour at full cost. Each failure extends the user's streak of
   identical failures (the cause with job ids, DIDs and counts masked out,

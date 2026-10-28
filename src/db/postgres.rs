@@ -24,8 +24,8 @@ use super::models::{
 use super::traits::{
     eta_seconds, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
     EnqueueOutcome, FeedSnapshot, FinishCompletion, NewAction, OauthSessionRow, OnnxScoreRow,
-    RefreshCandidate, ScanClaim, ScanKind, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
-    ScoreSnapshot,
+    RefreshCandidate, ScanClaim, ScanCostRow, ScanKind, ScanQueueDepth, ScanQueueEntry,
+    ScanQueueRow, ScanSkip, ScoreSnapshot, UserScanCost,
 };
 use crate::db::models::ScoringConfidence;
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
@@ -294,7 +294,7 @@ impl PgDatabase {
 /// boot-time `run_migrations` (always plays through the latest version) and
 /// `migrate_postgres_through` (test support for an authentic older-schema
 /// fixture — V2-07) so the two paths can never drift apart.
-fn all_migrations() -> [(i64, &'static str); 19] {
+fn all_migrations() -> [(i64, &'static str); 20] {
     [
         (
             1,
@@ -371,6 +371,10 @@ fn all_migrations() -> [(i64, &'static str); 19] {
         (
             19,
             include_str!("../../migrations/postgres/0019_account_gone.sql"),
+        ),
+        (
+            20,
+            include_str!("../../migrations/postgres/0020_scan_costs.sql"),
         ),
     ]
 }
@@ -1772,6 +1776,12 @@ impl Database for PgDatabase {
             .bind(user_did)
             .execute(&mut *tx)
             .await?;
+        // #393: the cost ledger is keyed by user DID; it must not outlive
+        // the account.
+        sqlx_core::query::query("DELETE FROM scan_costs WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
         // #257: scan_queue holds the user's admission state; a queued or
         // running row must not outlive the account.
         sqlx_core::query::query("DELETE FROM scan_queue WHERE user_did = $1")
@@ -3000,6 +3010,59 @@ impl Database for PgDatabase {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    // --- Scan cost ledger (#393) ---
+
+    async fn insert_scan_cost(&self, r: &ScanCostRow) -> Result<()> {
+        sqlx_core::query::query(
+            "INSERT INTO scan_costs (user_did, kind, outcome, started_at, finished_at,
+                 classifications, classifier_cache_hits, metered_worker_secs,
+                 peak_in_flight, est_cents, rate_cents_per_hour)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        )
+        .bind(&r.user_did)
+        .bind(&r.kind)
+        .bind(&r.outcome)
+        .bind(&r.started_at)
+        .bind(&r.finished_at)
+        .bind(r.classifications)
+        .bind(r.classifier_cache_hits)
+        .bind(r.metered_worker_secs)
+        .bind(r.peak_in_flight)
+        .bind(r.est_cents)
+        .bind(r.rate_cents_per_hour)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_user_scan_costs(&self) -> Result<Vec<UserScanCost>> {
+        let rows = sqlx_core::query::query(crate::db::queries::USER_SCAN_COSTS_SQL)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| UserScanCost {
+                user_did: r.get::<String, _>(0),
+                handle: r.get::<Option<String>, _>(1),
+                full_scan_cents: r.get::<Option<i64>, _>(2),
+                refresh_cents: r.get::<i64, _>(3),
+                total_cents: r.get::<i64, _>(4),
+                runs: r.get::<i64, _>(5),
+                last_finished_at: r.get::<String, _>(6),
+            })
+            .collect())
+    }
+
+    async fn scan_cost_cents_since(&self, since: &str) -> Result<i64> {
+        let row = sqlx_core::query::query(
+            "SELECT CAST(COALESCE(SUM(est_cents), 0) AS BIGINT) FROM scan_costs WHERE started_at >= $1",
+        )
+        .bind(since)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>(0))
     }
 
     async fn list_access_requests(&self) -> Result<Vec<AccessRequestRow>> {

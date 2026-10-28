@@ -254,6 +254,25 @@ export interface AccessListResponse {
 	denied: AccessRequest[];
 }
 
+export interface UserScanCost {
+	user_did: string;
+	handle: string | null;
+	/** Every full-scan row summed (resumes and failed attempts included); null when none. */
+	full_scan_cents: number | null;
+	refresh_cents: number;
+	total_cents: number;
+	runs: number;
+	last_finished_at: string;
+	over_onboarding_target: boolean;
+}
+
+export interface ScanCostsResponse {
+	last_7d_cents: number;
+	last_30d_cents: number;
+	onboarding_target_cents: number;
+	users: UserScanCost[];
+}
+
 export interface ApproveScanResponse {
 	did: string;
 	access: string;

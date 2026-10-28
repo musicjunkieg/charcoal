@@ -8,6 +8,7 @@ pub mod cached;
 pub mod cached_classifier;
 pub mod classifier;
 pub mod cost_meter;
+pub mod detoxify_classifier;
 pub mod download;
 pub mod ensemble;
 pub mod onnx;

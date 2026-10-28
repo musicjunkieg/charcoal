@@ -51,6 +51,7 @@ struct Acc {
     in_flight: u32,
     workers_max: u32,
     last_secs: Option<f64>,
+    peak_in_flight: u32,
 }
 
 impl Acc {
@@ -60,6 +61,7 @@ impl Acc {
             in_flight: 0,
             workers_max: workers_max.max(1),
             last_secs: None,
+            peak_in_flight: 0,
         }
     }
 
@@ -79,6 +81,12 @@ impl Acc {
     fn enter(&mut self, now_secs: f64) {
         self.accrue(now_secs);
         self.in_flight += 1;
+        // Most workers that were ever busy at once. Stored with the scan's
+        // cost so the 60 s idle tail RunPod bills per worker (which the
+        // integral cannot see) can be estimated later against real billing.
+        self.peak_in_flight = self
+            .peak_in_flight
+            .max(self.in_flight.min(self.workers_max));
     }
 
     /// A RunPod call finished: charge the interval it was part of, then drop it.
@@ -86,6 +94,16 @@ impl Acc {
         self.accrue(now_secs);
         self.in_flight = self.in_flight.saturating_sub(1);
     }
+}
+
+/// Point-in-time reading of a meter, persisted per scan (#393). A lower bound on
+/// the bill: excludes idle tails and cold starts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CostSnapshot {
+    pub worker_secs: f64,
+    pub peak_in_flight: u32,
+    pub est_cents: u32,
+    pub rate_cents_per_hour: u32,
 }
 
 /// Per-scan cost meter. Created once per scan, shared (Arc) with the RunPod
@@ -165,19 +183,41 @@ impl ScanCostMeter {
                 }
             },
         };
-        let rate_cents_per_hour = std::env::var("CHARCOAL_GPU_COST_CENTS_PER_HOUR")
-            .ok()
-            .and_then(|s| s.trim().parse::<u32>().ok())
-            .filter(|&v| v > 0)
-            .unwrap_or(DEFAULT_RATE_CENTS_PER_HOUR);
-        // Max concurrent RunPod workers — the per-worker billing multiplier the
-        // cost integral caps at. Set this to match the endpoint's workersMax.
-        let workers_max = std::env::var("CHARCOAL_RUNPOD_WORKERS_MAX")
-            .ok()
-            .and_then(|s| s.trim().parse::<u32>().ok())
-            .filter(|&v| v > 0)
-            .unwrap_or(DEFAULT_WORKERS_MAX);
-        Self::with_workers(ceiling_cents, rate_cents_per_hour, workers_max)
+        Self::from_env_with_ceiling(ceiling_cents)
+    }
+
+    /// As [`from_env`](Self::from_env) but with the ceiling given explicitly
+    /// (the eval's run cap). Rate and workers resolve exactly as production
+    /// does, so the eval counts spend the same way a scan would.
+    pub fn from_env_with_ceiling(ceiling_cents: u32) -> Self {
+        Self::from_overrides(
+            ceiling_cents,
+            std::env::var("CHARCOAL_GPU_COST_CENTS_PER_HOUR")
+                .ok()
+                .as_deref(),
+            std::env::var("CHARCOAL_RUNPOD_WORKERS_MAX").ok().as_deref(),
+        )
+    }
+
+    /// The env-free core shared by both constructors, so the parsing lives in
+    /// one place and is testable without mutating process-global env.
+    /// Rate: unset / malformed / 0 -> 329. Workers (the per-worker billing
+    /// multiplier; match the endpoint's workersMax): same rule -> 10.
+    fn from_overrides(
+        ceiling_cents: u32,
+        rate_raw: Option<&str>,
+        workers_raw: Option<&str>,
+    ) -> Self {
+        let positive = |raw: Option<&str>, default: u32| {
+            raw.and_then(|s| s.trim().parse::<u32>().ok())
+                .filter(|&v| v > 0)
+                .unwrap_or(default)
+        };
+        Self::with_workers(
+            ceiling_cents,
+            positive(rate_raw, DEFAULT_RATE_CENTS_PER_HOUR),
+            positive(workers_raw, DEFAULT_WORKERS_MAX),
+        )
     }
 
     /// Whether the one-shot trip WARN has fired. Introspection for tests
@@ -194,6 +234,23 @@ impl ScanCostMeter {
         let mut acc = self.acc.lock().unwrap();
         acc.accrue(now); // bring the integral current before reporting
         (acc.worker_secs / 3600.0 * self.rate_cents_per_hour as f64) as u32
+    }
+
+    /// Everything the scan cost ledger (#393) stores, read under one lock so
+    /// the cents and the integral agree.
+    pub fn snapshot(&self) -> CostSnapshot {
+        let now = self.now_secs();
+        let mut acc = self.acc.lock().unwrap();
+        acc.accrue(now);
+        CostSnapshot {
+            worker_secs: acc.worker_secs,
+            peak_in_flight: acc.peak_in_flight,
+            // Rounded, not truncated: the ledger sums this per row, and a
+            // small refresh (~0.7c) truncated to 0 would vanish from every
+            // total. The trip logic keeps its own arithmetic.
+            est_cents: (acc.worker_secs / 3600.0 * self.rate_cents_per_hour as f64).round() as u32,
+            rate_cents_per_hour: self.rate_cents_per_hour,
+        }
     }
 
     /// Core trip logic with an injected elapsed — the test seam (no Instant, no
@@ -281,6 +338,29 @@ impl ScanCostMeter {
 }
 
 #[cfg(test)]
+mod ceiling_ctor_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_ceiling_honours_rate_and_workers_overrides() {
+        let m = ScanCostMeter::from_overrides(42, Some(" 500 "), Some("3"));
+        assert_eq!(m.ceiling_cents, 42);
+        assert_eq!(m.rate_cents_per_hour, 500);
+        assert_eq!(m.acc.lock().unwrap().workers_max, 3);
+    }
+
+    #[test]
+    fn explicit_ceiling_falls_back_to_production_defaults() {
+        for bad in [None, Some("0"), Some("banana")] {
+            let m = ScanCostMeter::from_overrides(7, bad, bad);
+            assert_eq!(m.ceiling_cents, 7);
+            assert_eq!(m.rate_cents_per_hour, DEFAULT_RATE_CENTS_PER_HOUR);
+            assert_eq!(m.acc.lock().unwrap().workers_max, DEFAULT_WORKERS_MAX);
+        }
+    }
+}
+
+#[cfg(test)]
 mod acc_tests {
     use super::Acc;
 
@@ -327,6 +407,18 @@ mod acc_tests {
         a.leave(5.0); // 1×5 = 5, now 0 in flight
         a.accrue(100.0); // 95s with zero workers → no charge
         assert_eq!(a.worker_secs, 5.0);
+    }
+
+    #[test]
+    fn peak_tracks_most_concurrent_requests_capped_at_workers_max() {
+        let mut a = Acc::new(2);
+        a.enter(0.0);
+        a.enter(1.0);
+        a.enter(2.0); // 3 in flight, but RunPod runs at most 2 workers
+        a.leave(3.0);
+        a.leave(4.0);
+        a.leave(5.0);
+        assert_eq!(a.peak_in_flight, 2);
     }
 }
 
