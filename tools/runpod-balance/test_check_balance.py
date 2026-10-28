@@ -68,16 +68,13 @@ class DeliveryTests(unittest.TestCase):
         self.addCleanup(setattr, cb, "LOG_PATH", orig)
         self.addCleanup(tmp.cleanup)
 
-    def test_notify_failure_is_logged_to_the_redirected_path_not_the_real_log(self):
-        orig_run = cb.subprocess.run
-        cb.subprocess.run = lambda *a, **k: cb.subprocess.CompletedProcess(a, 1, "", "err")
-        os.environ.pop("CHARCOAL_ALERT_NTFY_TOPIC", None)
-        try:
-            cb.notify("t", "m")
-        finally:
-            cb.subprocess.run = orig_run
-        with open(cb.LOG_PATH, encoding="utf-8") as f:
-            self.assertIn("notification failed", f.read())
+    def test_delivery_tests_never_point_at_the_real_log(self):
+        # Guards setUp itself: reading back the log would pass even against
+        # the real file, so assert the path that is actually in use.
+        real = os.path.expanduser("~/Library/Logs/charcoal-runpod-balance.log")
+        self.assertNotEqual(os.path.realpath(cb.LOG_PATH), os.path.realpath(real))
+        self.assertTrue(cb.LOG_PATH.startswith(tempfile.gettempdir()))
+
     def test_log_never_raises_when_the_file_cannot_be_written(self):
         # A logging failure must not stop the alert that follows it.
         orig = cb.LOG_PATH

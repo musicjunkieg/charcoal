@@ -53,7 +53,7 @@ env = {}
 if topic:
     env["CHARCOAL_ALERT_NTFY_TOPIC"] = topic
 for name in ("CHARCOAL_MIN_BALANCE_USD", "CHARCOAL_MAX_DAILY_SPEND_USD"):
-    if name in os.environ:
+    if os.environ.get(name):  # skip unset and empty (NAME=) alike
         env[name] = os.environ[name]
 if env:
     job["EnvironmentVariables"] = env

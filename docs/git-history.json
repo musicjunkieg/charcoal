@@ -1,5 +1,13 @@
 [
   {
+    "hash": "da77a78ca2237e06ae3de2fe104531868533ebb9",
+    "short_hash": "da77a78",
+    "author": "Bryan Guffey",
+    "date": "2026-10-27T21:22:35-07:00",
+    "message": "fix(412): scrub private names from eval pool; balance-check review fixes\n\nCodeRabbit on promotion PR #151:\n- evals/classifiers/pool.jsonl: replace private first names in harvested\n  post text with <name> (7 rows). Public figures stay. No committed label\n  refers to these rows.\n- install.sh: copy CHARCOAL_MIN_BALANCE_USD / CHARCOAL_MAX_DAILY_SPEND_USD\n  into the launchd job; launchd does not inherit the shell environment.\n- test_check_balance.py: DeliveryTests log to a temp file, not the real log.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 6
+  },
+  {
     "hash": "3977d73afecd2b867b03d26d1349dfb54dc52f54",
     "short_hash": "3977d73",
     "author": "Bryan Guffey",

@@ -13067,6 +13067,17 @@
       "created_at": "2026-10-27T19:36:27.206993-07:00",
       "updated_at": "2026-10-27T19:36:27.206993-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"3977d73\",\"confidence\":90}"
+    },
+    {
+      "id": 1198,
+      "change_id": "7e820b3b-0abd-49e8-9f1f-3026334609bb",
+      "node_type": "action",
+      "title": "Fix PR #151 CodeRabbit findings: scrub private names in eval pool, forward balance overrides to launchd, isolate test log",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-27T21:24:02.043479-07:00",
+      "updated_at": "2026-10-27T21:24:02.043479-07:00",
+      "metadata_json": "{\"branch\":\"fix/412-promotion-review-findings\",\"commit\":\"da77a78\",\"confidence\":90,\"files\":[\"evals/classifiers/pool.jsonl\",\"tools/runpod-balance/install.sh\",\"tools/runpod-balance/test_check_balance.py\",\"tools/runpod-balance/README.md\"]}"
     }
   ],
   "edges": [
@@ -26731,6 +26742,17 @@
       "weight": 1.0,
       "rationale": "Ratio needs prod rows, so promote",
       "created_at": "2026-10-27T19:36:29.580609-07:00"
+    },
+    {
+      "id": 1253,
+      "from_node_id": 1197,
+      "to_node_id": 1198,
+      "from_change_id": "b98d1783-c68c-463f-831e-60e83814bbd0",
+      "to_change_id": "7e820b3b-0abd-49e8-9f1f-3026334609bb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit blocked the promotion PR",
+      "created_at": "2026-10-27T21:24:04.145946-07:00"
     }
   ],
   "documents": [
