@@ -129,6 +129,16 @@ class DeliveryTests(unittest.TestCase):
             cb.notify, cb.LOG_PATH = orig_notify, orig_log
             cb.read_api_key, cb._request = orig_key, orig_req
 
+    def test_empty_threshold_setting_means_the_default(self):
+        # The installer drops NAME= from the daily job; the check must read it
+        # the same way so the first run and the job agree.
+        for blank in ("", "   "):
+            os.environ["CHARCOAL_MIN_BALANCE_USD"] = blank
+            try:
+                self.assertEqual(cb._threshold("CHARCOAL_MIN_BALANCE_USD", 25.0), 25.0)
+            finally:
+                os.environ.pop("CHARCOAL_MIN_BALANCE_USD", None)
+
     def test_notify_reports_failure_when_no_channel_delivers(self):
         orig_run = cb.subprocess.run
         cb.subprocess.run = lambda *a, **k: cb.subprocess.CompletedProcess(a, 1, "", "err")

@@ -47,14 +47,23 @@ job = {
     "StandardErrorPath": out,
 }
 # launchd does not inherit this shell's environment, so a threshold override
-# exported before install would apply to the first check below but not to the
-# daily job. Copy any that are set into the job.
+# must be written into the job. An override exported now wins; otherwise keep
+# the one from the previous install, so reinstalling to change one threshold
+# does not silently reset the other to its default.
+previous = {}
+try:
+    with open(plist, "rb") as f:
+        previous = plistlib.load(f).get("EnvironmentVariables", {})
+except (OSError, plistlib.InvalidFileException):
+    pass
 env = {}
 if topic:
     env["CHARCOAL_ALERT_NTFY_TOPIC"] = topic
 for name in ("CHARCOAL_MIN_BALANCE_USD", "CHARCOAL_MAX_DAILY_SPEND_USD"):
-    if os.environ.get(name):  # skip unset and empty (NAME=) alike
-        env[name] = os.environ[name]
+    value = os.environ.get(name, "").strip() or str(previous.get(name, "")).strip()
+    if value:  # unset and empty (NAME=) both mean "use the default"
+        env[name] = value
+        print(f"  {name}={value}")
 if env:
     job["EnvironmentVariables"] = env
 with open(plist, "wb") as f:
@@ -66,9 +75,18 @@ launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "Installed $LABEL (daily 9:00 AM). Running the first check now:"
 
-# Run it synchronously (not via kickstart) so the result shown is THIS run's.
+# Run it synchronously (not via kickstart) so the result shown is THIS run's,
+# with exactly the job's environment: the shell's thresholds are dropped and
+# the plist's applied, so the first check and the daily job cannot disagree.
 set +e
-CHARCOAL_ALERT_NTFY_TOPIC="$TOPIC" "$PY" "$SCRIPT"
+"$PY" - "$PLIST" "$PY" "$SCRIPT" <<'PY_EOF'
+import os, plistlib, subprocess, sys
+plist, py, script = sys.argv[1:4]
+env = {k: v for k, v in os.environ.items() if not k.startswith("CHARCOAL_")}
+with open(plist, "rb") as f:
+    env.update(plistlib.load(f).get("EnvironmentVariables", {}))
+sys.exit(subprocess.run([py, script], env=env).returncode)
+PY_EOF
 rc=$?
 set -e
 case $rc in

@@ -61,8 +61,10 @@ def _usd(value, name):
 
 def _threshold(env_name, default):
     """A finite, non-negative threshold from the environment. A negative one
-    is as meaningless as NaN: a balance can never be "below -5"."""
-    amount = _usd(os.environ.get(env_name, default), f"{env_name} setting")
+    is as meaningless as NaN: a balance can never be "below -5". An empty
+    setting (NAME=) counts as unset, matching what install.sh writes."""
+    raw = os.environ.get(env_name, "").strip()
+    amount = _usd(raw or default, f"{env_name} setting")
     if amount < 0:
         raise CheckError(f"{env_name} setting must not be negative: {amount}")
     return amount

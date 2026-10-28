@@ -51,7 +51,10 @@ immediately on install.
 
 To change a threshold, export it when you run the installer
 (`CHARCOAL_MIN_BALANCE_USD=40 tools/runpod-balance/install.sh <topic>`); the
-installer copies it into the daily job. Re-run the installer to change it.
+installer copies it into the daily job and prints the overrides in effect.
+Re-running the installer keeps any override you don't set again, so you can
+change one threshold at a time. To go back to the defaults, uninstall (below)
+and install again.
 
 ## Reading it
 
