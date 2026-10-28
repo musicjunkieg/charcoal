@@ -37,7 +37,7 @@ mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 
 # plistlib writes valid, escaped XML whatever the paths or topic contain.
 "$PY" - "$PLIST" "$LABEL" "$PY" "$SCRIPT" "$HOME/Library/Logs/charcoal-runpod-balance.out" "$TOPIC" <<'PY_EOF'
-import plistlib, sys
+import os, plistlib, sys
 plist, label, py, script, out, topic = sys.argv[1:7]
 job = {
     "Label": label,
@@ -46,8 +46,17 @@ job = {
     "StandardOutPath": out,
     "StandardErrorPath": out,
 }
+# launchd does not inherit this shell's environment, so a threshold override
+# exported before install would apply to the first check below but not to the
+# daily job. Copy any that are set into the job.
+env = {}
 if topic:
-    job["EnvironmentVariables"] = {"CHARCOAL_ALERT_NTFY_TOPIC": topic}
+    env["CHARCOAL_ALERT_NTFY_TOPIC"] = topic
+for name in ("CHARCOAL_MIN_BALANCE_USD", "CHARCOAL_MAX_DAILY_SPEND_USD"):
+    if name in os.environ:
+        env[name] = os.environ[name]
+if env:
+    job["EnvironmentVariables"] = env
 with open(plist, "wb") as f:
     plistlib.dump(job, f)
 PY_EOF

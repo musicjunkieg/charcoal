@@ -3,6 +3,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -58,6 +59,25 @@ class ParseTests(unittest.TestCase):
 
 
 class DeliveryTests(unittest.TestCase):
+    def setUp(self):
+        # notify() logs channel failures; keep them out of the real log the
+        # operator reads on the Mac mini.
+        orig = cb.LOG_PATH
+        tmp = tempfile.TemporaryDirectory()
+        cb.LOG_PATH = os.path.join(tmp.name, "test.log")
+        self.addCleanup(setattr, cb, "LOG_PATH", orig)
+        self.addCleanup(tmp.cleanup)
+
+    def test_notify_failure_is_logged_to_the_redirected_path_not_the_real_log(self):
+        orig_run = cb.subprocess.run
+        cb.subprocess.run = lambda *a, **k: cb.subprocess.CompletedProcess(a, 1, "", "err")
+        os.environ.pop("CHARCOAL_ALERT_NTFY_TOPIC", None)
+        try:
+            cb.notify("t", "m")
+        finally:
+            cb.subprocess.run = orig_run
+        with open(cb.LOG_PATH, encoding="utf-8") as f:
+            self.assertIn("notification failed", f.read())
     def test_log_never_raises_when_the_file_cannot_be_written(self):
         # A logging failure must not stop the alert that follows it.
         orig = cb.LOG_PATH

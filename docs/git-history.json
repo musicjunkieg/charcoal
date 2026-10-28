@@ -1,5 +1,13 @@
 [
   {
+    "hash": "3977d73afecd2b867b03d26d1349dfb54dc52f54",
+    "short_hash": "3977d73",
+    "author": "Bryan Guffey",
+    "date": "2026-10-25T18:54:31-07:00",
+    "message": "Merge pull request #150 from musicjunkieg/feat/411-runpod-balance-check\n\nfeat(411): daily RunPod balance and spend check from the Mac",
+    "files_changed": 0
+  },
+  {
     "hash": "d2b1104d0fd73954623811979cc23825748f6e6e",
     "short_hash": "d2b1104",
     "author": "Bryan Guffey",

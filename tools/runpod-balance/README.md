@@ -49,6 +49,10 @@ uses REST v2.
 It runs daily at 9:00 AM PT (or on wake, if the Mac was asleep) and once
 immediately on install.
 
+To change a threshold, export it when you run the installer
+(`CHARCOAL_MIN_BALANCE_USD=40 tools/runpod-balance/install.sh <topic>`); the
+installer copies it into the daily job. Re-run the installer to change it.
+
 ## Reading it
 
 Every run appends one line to `~/Library/Logs/charcoal-runpod-balance.log`:
