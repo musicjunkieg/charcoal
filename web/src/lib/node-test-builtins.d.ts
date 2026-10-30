@@ -1,6 +1,7 @@
 // Ambient module declaration for the ONE Node built-in this project's tests
 // import (tokens.test.ts reads tokens.css via node:fs to check --x-rgb
-// triplets against their --x hex tokens).
+// triplets against their --x hex tokens; privacy-facts.test.ts reads backend
+// sources by URL relative to itself, so it works from any working directory).
 //
 // We deliberately do NOT depend on @types/node for this. @types/node's
 // index.d.ts pulls in globals.d.ts, which does `declare global { var
@@ -21,5 +22,5 @@
 // files that don't import it. Extend this if a future test needs another
 // node: built-in — do not swap it back for @types/node.
 declare module 'node:fs' {
-	export function readFileSync(path: string, encoding: string): string;
+	export function readFileSync(path: string | URL, encoding: string): string;
 }
