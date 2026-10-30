@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- #259 — a plain-language privacy page at `/privacy`, covering both people
+  who use Charcoal and the accounts it scores, who never signed up. It says
+  only what the code does today, including the uncomfortable parts: scores
+  and example posts have no retention limit yet (#260), and a scored account
+  can ask to see its data or for a review, but not for deletion on demand,
+  because the protection would mean little if flagged accounts could remove
+  themselves. Its retention figures, post counts and cookie lifetime come
+  from one module that a test checks against the backend constants, so a
+  backend change fails CI until the page is updated. The landing footer's
+  dead `/terms` link is gone; `/privacy` now resolves.
 - #393 — every full scan and nightly refresh records its estimated GPU cost
   in a new `scan_costs` table (schema v20), success or failure, and logs a
   one-line summary. The admin page shows per-user full-scan, refresh and

@@ -465,7 +465,6 @@
 			<nav class="footer-nav">
 				<a href="/login">Sign in</a>
 				<a href="/privacy">Privacy</a>
-				<a href="/terms">Terms</a>
 			</nav>
 
 			<p class="footer-copy">&copy; 2024 Charcoal. Engage with confidence.</p>
