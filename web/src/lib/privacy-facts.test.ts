@@ -43,7 +43,7 @@ describe('privacy page facts match the backend', () => {
 	it('example posts kept per scored account', () => {
 		const rs = src('src/scoring/profile.rs');
 		expect(PRIVACY_FACTS.examplePostsPerAccount).toBe(
-			grab(rs, /let top_toxic_posts[\s\S]*?\.take\((\d+)\)/)
+			grab(rs, /let top_toxic_posts[^;]*?\.take\((\d+)\)/)
 		);
 	});
 
@@ -62,6 +62,34 @@ describe('privacy page facts match the backend', () => {
 			min: Math.min(...days),
 			max: Math.max(...days)
 		});
+	});
+});
+
+describe('privacy page permission claims match the backend', () => {
+	// The page promises mute/block asks for exactly these abilities and
+	// nothing broader. Pin the scope string so widening it fails here.
+	const rs = src('src/web/actions/scope.rs');
+	const body = rs.match(/pub fn write_scope\(\) -> String \{([\s\S]*?)\n\}/);
+
+	it('write consent asks only for block create/delete and four graph calls', () => {
+		expect(body).not.toBeNull();
+		const scope = body![1];
+		expect(scope).toContain('repo:app.bsky.graph.block?action=create&action=delete');
+		const rpcs = [...scope.matchAll(/rpc:app\.bsky\.graph\.(\w+)\?/g)].map((m) => m[1]);
+		expect(rpcs.sort()).toEqual(['getBlocks', 'getMutes', 'muteActor', 'unmuteActor']);
+		expect(scope).not.toContain('transition:');
+	});
+});
+
+describe('privacy page "no analytics" claim', () => {
+	// When analytics lands (#390), this fails until the page says so.
+	it('the frontend ships no analytics SDK', () => {
+		const pkg = src('web/package.json');
+		expect(pkg).not.toMatch(/posthog|google-analytics|gtag|plausible|segment|mixpanel/i);
+	});
+
+	it('the backend has no analytics SDK', () => {
+		expect(src('Cargo.toml')).not.toMatch(/posthog|segment|mixpanel/i);
 	});
 });
 

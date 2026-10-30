@@ -71,8 +71,8 @@
 					<li>your request for access, and whether it was approved.</li>
 				</ul>
 				<p>
-					Signing in asks Bluesky only to confirm who you are. Charcoal can't post, follow, or
-					read anything private.
+					Signing in on its own asks Bluesky only to confirm who you are. With just that, Charcoal
+					can't post, follow, or read anything private.
 				</p>
 				<p>
 					<strong>If you turn on mute and block,</strong> Charcoal asks Bluesky for exactly these
@@ -88,7 +88,9 @@
 				<h2>If Charcoal scored your account</h2>
 				<p>
 					If you post on Bluesky, Charcoal may have scored your account for a user who can see
-					your public activity. For each scored account it keeps:
+					your public activity. It also notes any account that quoted or reposted a user's posts
+					(the handle and the text of the quote), whether or not it went on to score that
+					account. For each scored account it keeps:
 				</p>
 				<ul>
 					<li>your account ID and handle;</li>
@@ -109,7 +111,9 @@
 				<p>
 					<strong>Who sees this:</strong> only the user it was scored for, and the operator. It is
 					never published, shared between users, sold, or turned into a list or label. Charcoal
-					doesn't contact you.
+					doesn't contact you. The {f.postCacheDays}-day cache of your public posts is reused when
+					another user's scan needs the same account, so Charcoal doesn't fetch them twice, but
+					no user is ever shown it.
 				</p>
 				<p>
 					<strong>If someone blocks or mutes you through Charcoal:</strong> a mute is private. A
@@ -149,8 +153,8 @@
 						replied to.
 					</li>
 					<li>
-						<strong>Bluesky</strong> (its public API and account directory), to read public posts
-						and look up accounts, and <strong>Constellation</strong>
+						<strong>Bluesky</strong> (its public API, and the account directory at plc.directory),
+						to read public posts and look up accounts, and <strong>Constellation</strong>
 						(constellation.microcosm.blue), to find quotes and reposts of a user's posts.
 					</li>
 					<li>
@@ -201,10 +205,15 @@
 			<section>
 				<h2>Deleting your account</h2>
 				<p>
-					Email the operator and everything tied to your account is deleted: your fingerprint, the
-					scores made for you, your labels, your action log, and your stored permission.
+					Email the operator and your account's data is deleted: your fingerprint, the scores made
+					for you, your labels, your action log, and your stored permission.
 					<strong>Mutes and blocks already made stay on Bluesky</strong>, because they're yours, so
 					undo any you want reversed in Charcoal first.
+				</p>
+				<p>
+					Not removed at that moment: the record that you asked for access and the decision on it;
+					the shared cache of public posts, which is gone within {f.postCacheDays} days; server logs,
+					which age out; and the few recent backups the operator keeps.
 				</p>
 			</section>
 

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "a23c7e4fc9bf6a09511471cd2c3b972eedf62a97",
+    "short_hash": "a23c7e4",
+    "author": "Bryan Guffey",
+    "date": "2026-10-29T19:30:41-07:00",
+    "message": "feat(259): plain-language privacy page at /privacy\n\nCovers users and the third-party accounts Charcoal scores. Every figure\n(cache retention, posts kept, cookie lifetime, score freshness) comes from\nprivacy-facts.ts, which a test checks against the backend constants.\nScored accounts may ask to see their data or for a review; no deletion on\ndemand. Drops the dead /terms footer link.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 8
+  },
+  {
     "hash": "4b04b3ac0e01ac4ff916b32dea2a4b89542d67ae",
     "short_hash": "4b04b3a",
     "author": "Bryan Guffey",
