@@ -932,6 +932,120 @@ async fn test_pg_staging_round_trip() {
     );
 }
 
+/// #417: a burst batch is ~500 verdicts written in one call. The write must
+/// land every row with its own values, keep the last verdict when a batch
+/// names the same post twice (what the old row-by-row loop did), ignore
+/// verdicts for rows that are not queued, and never touch another user's
+/// queue. Uses its own users so it cannot race test_pg_staging_round_trip,
+/// which clears TEST_USER's queue.
+#[tokio::test]
+async fn test_pg_record_verdicts_large_batch() {
+    const BATCH_USER: &str = "did:plc:pgtest_batch417000000000";
+    const OTHER_USER: &str = "did:plc:pgtest_other417000000000";
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    for user in [BATCH_USER, OTHER_USER] {
+        db.clear_scan_staging(user).await.unwrap();
+        db.upsert_user(user, "pgtest417.bsky.social").await.unwrap();
+    }
+
+    // 600 pending posts across 3 accounts — more than one burst batch.
+    let queued: Vec<QueueRow> = (0..600)
+        .map(|i| {
+            let account = format!("did:plc:batch{}", i % 3);
+            make_pg_queue_row(&account, &format!("at://{account}/post/{i}"), "pending")
+        })
+        .collect();
+    db.enqueue_classifications(BATCH_USER, &queued)
+        .await
+        .unwrap();
+    // The other user has the very same (account, post) for post 0.
+    db.enqueue_classifications(OTHER_USER, &queued[..1])
+        .await
+        .unwrap();
+
+    let verdict_for = |i: usize| VerdictRow {
+        account_did: queued[i].account_did.clone(),
+        post_uri: queued[i].post_uri.clone(),
+        toxic_token: i.is_multiple_of(2),
+        confidence: (i as f32) / 1000.0,
+        model_id: format!("model-{i}"),
+        policy_version: "p417".to_string(),
+    };
+    // Verdicts for posts 0..599 except 599, which stays pending.
+    let mut verdicts: Vec<VerdictRow> = (0..599).map(verdict_for).collect();
+    // A later verdict for post 5 in the same batch must win.
+    verdicts.push(VerdictRow {
+        toxic_token: true,
+        confidence: 0.999,
+        model_id: "model-5-late".to_string(),
+        ..verdict_for(5)
+    });
+    // A verdict for a post that was never queued must be ignored.
+    verdicts.push(VerdictRow {
+        post_uri: "at://did:plc:batch0/post/not-queued".to_string(),
+        ..verdict_for(0)
+    });
+
+    db.record_classification_verdicts(BATCH_USER, &verdicts)
+        .await
+        .unwrap();
+
+    let mut stored = Vec::new();
+    for a in 0..3 {
+        stored.extend(
+            db.fetch_account_verdicts(BATCH_USER, &format!("did:plc:batch{a}"))
+                .await
+                .unwrap(),
+        );
+    }
+    assert_eq!(stored.len(), 600, "no row may be inserted or lost");
+    for row in &stored {
+        let i: usize = row.post_uri.rsplit('/').next().unwrap().parse().unwrap();
+        if i == 599 {
+            assert_eq!(row.status, "pending", "post 599 had no verdict");
+            assert_eq!(row.toxic_token, None);
+            continue;
+        }
+        assert_eq!(row.status, "done", "post {i}");
+        if i == 5 {
+            assert_eq!(row.toxic_token, Some(true), "last verdict wins");
+            assert_eq!(row.model_id.as_deref(), Some("model-5-late"));
+            assert!((row.confidence.unwrap() - 0.999).abs() < 1e-6);
+            continue;
+        }
+        let want = verdict_for(i);
+        assert_eq!(row.toxic_token, Some(want.toxic_token), "post {i}");
+        assert!(
+            (row.confidence.unwrap() - want.confidence).abs() < 1e-6,
+            "post {i} confidence"
+        );
+        assert_eq!(row.model_id.as_deref(), Some(want.model_id.as_str()));
+        assert_eq!(row.policy_version.as_deref(), Some("p417"));
+    }
+
+    let other = db
+        .fetch_account_verdicts(OTHER_USER, &queued[0].account_did)
+        .await
+        .unwrap();
+    assert_eq!(other.len(), 1);
+    assert_eq!(
+        other[0].status, "pending",
+        "another user's row is untouched"
+    );
+
+    // An empty batch is a no-op, not an error.
+    db.record_classification_verdicts(BATCH_USER, &[])
+        .await
+        .unwrap();
+
+    for user in [BATCH_USER, OTHER_USER] {
+        db.clear_scan_staging(user).await.unwrap();
+    }
+}
+
 /// #344 R11: the fresh predicate on Postgres — `scoring_generation = $n AND
 /// valid_until > NOW()`, natively boolean (no COALESCE needed; valid_until is
 /// NOT NULL here) — matches the SQLite semantics pinned in

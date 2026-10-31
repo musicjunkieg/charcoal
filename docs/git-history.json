@@ -1,5 +1,45 @@
 [
   {
+    "hash": "a94d56ce8bbe38383251ee8f1553d71fc715da8b",
+    "short_hash": "a94d56c",
+    "author": "Bryan Guffey",
+    "date": "2026-10-29T19:33:55-07:00",
+    "message": "fix(259): review fixes to privacy page accuracy and its guard tests\n\nDeletion section now says what is not removed at once (access request,\nshared post cache, logs, backups); notes the post cache is reused across\nscans, that quoting accounts are recorded, plc.directory, and scopes the\n\"cannot read anything private\" line to sign-in alone. Tests now pin the\nwrite-consent scope (mutation-checked) and fail if an analytics SDK is\nadded while the page says there is none.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "a23c7e4fc9bf6a09511471cd2c3b972eedf62a97",
+    "short_hash": "a23c7e4",
+    "author": "Bryan Guffey",
+    "date": "2026-10-29T19:30:41-07:00",
+    "message": "feat(259): plain-language privacy page at /privacy\n\nCovers users and the third-party accounts Charcoal scores. Every figure\n(cache retention, posts kept, cookie lifetime, score freshness) comes from\nprivacy-facts.ts, which a test checks against the backend constants.\nScored accounts may ask to see their data or for a review; no deletion on\ndemand. Drops the dead /terms footer link.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 8
+  },
+  {
+    "hash": "cfeac01c9fb045229ecd9d0e536bc0f0d91ecb99",
+    "short_hash": "cfeac01",
+    "author": "Bryan Guffey",
+    "date": "2026-10-29T11:27:18-07:00",
+    "message": "Merge pull request #142 from musicjunkieg/chore/template-sync-cf-cli",
+    "files_changed": 0
+  },
+  {
+    "hash": "4b04b3ac0e01ac4ff916b32dea2a4b89542d67ae",
+    "short_hash": "4b04b3a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-27T21:50:38-07:00",
+    "message": "Merge pull request #152 from musicjunkieg/fix/412-promotion-review-findings\n\nfix(412): scrub private names from eval pool; balance-check review fixes",
+    "files_changed": 0
+  },
+  {
+    "hash": "8226242133125211f454b5f6c45931b5a7c86530",
+    "short_hash": "8226242",
+    "author": "Bryan Guffey",
+    "date": "2026-10-27T21:40:41-07:00",
+    "message": "fix(412): validate thresholds before replacing the job; clean first-check env\n\nCodeRabbit on #152:\n- A rejected threshold (nan, negative, junk) now stops the install\n  before the plist is written, so the existing job is left as it was.\n- The first check runs with a launchd-like environment (HOME/USER/\n  LOGNAME/TMPDIR, system PATH, plus the plist variables), so a\n  shell-only RUNPOD_BILLING_API_KEY cannot make it pass where the daily\n  job would fail.\n- README: unset exported thresholds before reinstalling for defaults.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
     "hash": "da77a78ca2237e06ae3de2fe104531868533ebb9",
     "short_hash": "da77a78",
     "author": "Bryan Guffey",
