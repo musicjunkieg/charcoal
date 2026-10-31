@@ -122,6 +122,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   failed sweep warns and lets the scan continue.
 
 ### Fixed
+- #417 — a scan's GPU phase now saves each batch of classifier verdicts in
+  one database statement instead of one per post (~500 per batch). With prod
+  Postgres in Singapore that was a 60–120 s pause between GPU bursts, and
+  RunPod billed idle workers through every pause: grimalkina's rescan cost
+  $12.84, about 6x staging's cost per classified post (0.062¢ vs 0.0105¢). If a batch names the same post twice,
+  the later verdict still wins, as before.
+- #416 — moved prod Postgres from `asia-southeast1` to `us-west2`, next to
+  the web service (round trip 182 ms → 4 ms). The 2026-09-07 move had only
+  ever taken effect on staging. Backup and per-table row counts were taken
+  before the move and matched after it.
 - #408 — after `CHARCOAL_TOKEN_KEY` is rotated, a stored Bluesky connection
   sealed under the old key now reads as "not connected" (status and the
   action runner alike) instead of showing as connected while every mute/block
