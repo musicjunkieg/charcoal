@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2b87e308fb2fad9ec1769aa9e454c11158ec6a10",
+    "short_hash": "2b87e30",
+    "author": "Bryan Guffey",
+    "date": "2026-10-31T12:38:16-07:00",
+    "message": "fix(417): write a burst batch of verdicts in one UPDATE\n\nrecord_classification_verdicts on Postgres issued one UPDATE per verdict,\nso each 500-row burst batch cost 500 round trips. With prod Postgres in\nanother region (~180 ms each) that paused the GPU phase 60-120 s between\nbatches, and RunPod billed idle workers through every pause.\n\nNow one UPDATE ... FROM UNNEST per batch. Duplicates are collapsed\nlast-write-wins first, because UPDATE ... FROM applies an arbitrary source\nrow when two match, while the old loop let the later verdict win.\n\nThe new test pins the old behaviour (passed before the change) and was\nmutation-checked: dropping the user filter or the last-write-wins dedupe\nboth fail it. SQLite is unchanged: it is local, with no round-trip cost.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
     "hash": "a94d56ce8bbe38383251ee8f1553d71fc715da8b",
     "short_hash": "a94d56c",
     "author": "Bryan Guffey",
