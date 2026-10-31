@@ -961,6 +961,13 @@ async fn test_pg_record_verdicts_large_batch() {
     db.enqueue_classifications(BATCH_USER, &queued)
         .await
         .unwrap();
+    // Another account of the same user shares post 0's URI and gets no
+    // verdict, so the account must be part of the match.
+    let same_uri_other_account =
+        make_pg_queue_row("did:plc:batch1", &queued[0].post_uri, "pending");
+    db.enqueue_classifications(BATCH_USER, &[same_uri_other_account])
+        .await
+        .unwrap();
     // The other user has the very same (account, post) for post 0.
     db.enqueue_classifications(OTHER_USER, &queued[..1])
         .await
@@ -1001,8 +1008,13 @@ async fn test_pg_record_verdicts_large_batch() {
                 .unwrap(),
         );
     }
-    assert_eq!(stored.len(), 600, "no row may be inserted or lost");
+    assert_eq!(stored.len(), 601, "no row may be inserted or lost");
     for row in &stored {
+        if row.account_did == "did:plc:batch1" && row.post_uri == queued[0].post_uri {
+            assert_eq!(row.status, "pending", "account must be part of the match");
+            assert_eq!(row.toxic_token, None);
+            continue;
+        }
         let i: usize = row.post_uri.rsplit('/').next().unwrap().parse().unwrap();
         if i == 599 {
             assert_eq!(row.status, "pending", "post 599 had no verdict");
