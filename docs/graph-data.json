@@ -13408,6 +13408,28 @@
       "created_at": "2026-11-01T15:17:52.577686-08:00",
       "updated_at": "2026-11-01T15:17:52.577686-08:00",
       "metadata_json": "{\"branch\":\"fix/417-batch-verdict-writes\",\"confidence\":90}"
+    },
+    {
+      "id": 1229,
+      "change_id": "d27f9bab-e164-41bd-91e7-cecf31944215",
+      "node_type": "action",
+      "title": "Fix cloud-setup.sh cached cf vs lockfile (#418, PR #156) to clear CodeRabbit on promotion PR #155",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-01T15:27:39.177483-08:00",
+      "updated_at": "2026-11-01T15:27:39.177483-08:00",
+      "metadata_json": "{\"branch\":\"fix/418-cloud-setup-lockfile\",\"commit\":\"8bcf181\",\"confidence\":85,\"files\":[\".claude/hooks/cloud-setup.sh\"]}"
+    },
+    {
+      "id": 1230,
+      "change_id": "9b3814c1-e1c5-4189-a13e-4cb672b3d99c",
+      "node_type": "outcome",
+      "title": "Upstreamed cloud-setup lockfile fix to project-template PR #44 with regression test",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-01T15:34:59.830689-08:00",
+      "updated_at": "2026-11-01T15:34:59.830689-08:00",
+      "metadata_json": "{\"branch\":\"fix/418-cloud-setup-lockfile\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -27402,6 +27424,17 @@
       "weight": 1.0,
       "rationale": "Applied",
       "created_at": "2026-11-01T15:17:52.594541-08:00"
+    },
+    {
+      "id": 1283,
+      "from_node_id": 1229,
+      "to_node_id": 1230,
+      "from_change_id": "d27f9bab-e164-41bd-91e7-cecf31944215",
+      "to_change_id": "9b3814c1-e1c5-4189-a13e-4cb672b3d99c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Upstream so template sync doesn't revert it",
+      "created_at": "2026-11-01T15:35:01.745420-08:00"
     }
   ],
   "documents": [
