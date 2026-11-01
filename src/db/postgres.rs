@@ -1948,28 +1948,65 @@ impl Database for PgDatabase {
         user_did: &str,
         verdicts: &[VerdictRow],
     ) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        for v in verdicts {
-            sqlx_core::query::query(
-                "UPDATE classification_queue
-                 SET status = 'done',
-                     toxic_token    = $1,
-                     confidence     = $2,
-                     model_id       = $3,
-                     policy_version = $4
-                 WHERE user_did = $5 AND account_did = $6 AND post_uri = $7",
-            )
-            .bind(v.toxic_token)
-            .bind(v.confidence)
-            .bind(&v.model_id)
-            .bind(&v.policy_version)
-            .bind(user_did)
-            .bind(&v.account_did)
-            .bind(&v.post_uri)
-            .execute(&mut *tx)
-            .await?;
+        if verdicts.is_empty() {
+            return Ok(());
         }
-        tx.commit().await?;
+        // One UNNEST round trip for the whole batch (#417). This used to be
+        // one UPDATE per verdict: 500 round trips per burst batch. With the
+        // database in another region (~180 ms each) that was a ~90 s pause
+        // between GPU bursts, and RunPod billed the idle workers through
+        // every pause. One statement makes the burst insensitive to DB
+        // distance.
+        //
+        // Deduplicated last-write-wins first: UPDATE ... FROM with two source
+        // rows for one target row applies an arbitrary one of them, whereas
+        // the old loop let the later verdict win. Keep that behaviour.
+        let mut last: std::collections::HashMap<(&str, &str), &VerdictRow> =
+            std::collections::HashMap::with_capacity(verdicts.len());
+        for v in verdicts {
+            last.insert((v.account_did.as_str(), v.post_uri.as_str()), v);
+        }
+        let mut account_dids: Vec<&str> = Vec::with_capacity(last.len());
+        let mut post_uris: Vec<&str> = Vec::with_capacity(last.len());
+        let mut toxic_tokens: Vec<bool> = Vec::with_capacity(last.len());
+        let mut confidences: Vec<f32> = Vec::with_capacity(last.len());
+        let mut model_ids: Vec<&str> = Vec::with_capacity(last.len());
+        let mut policy_versions: Vec<&str> = Vec::with_capacity(last.len());
+        for ((account_did, post_uri), v) in last {
+            account_dids.push(account_did);
+            post_uris.push(post_uri);
+            toxic_tokens.push(v.toxic_token);
+            confidences.push(v.confidence);
+            model_ids.push(&v.model_id);
+            policy_versions.push(&v.policy_version);
+        }
+
+        // Explicit array casts so Postgres can type UNNEST's columns;
+        // confidence is REAL, hence float4[].
+        sqlx_core::query::query(
+            "UPDATE classification_queue AS q
+             SET status = 'done',
+                 toxic_token    = t.toxic_token,
+                 confidence     = t.confidence,
+                 model_id       = t.model_id,
+                 policy_version = t.policy_version
+             FROM UNNEST($2::text[], $3::text[], $4::bool[], $5::float4[],
+                         $6::text[], $7::text[])
+                  AS t(account_did, post_uri, toxic_token, confidence,
+                       model_id, policy_version)
+             WHERE q.user_did = $1
+               AND q.account_did = t.account_did
+               AND q.post_uri = t.post_uri",
+        )
+        .bind(user_did)
+        .bind(&account_dids)
+        .bind(&post_uris)
+        .bind(&toxic_tokens)
+        .bind(&confidences)
+        .bind(&model_ids)
+        .bind(&policy_versions)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 

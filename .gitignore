@@ -11,8 +11,8 @@
 # patterns that don't belong in the template. Git does NOT read this
 # file by itself — `scripts/install-hooks.sh` wires it in by symlinking
 # the per-clone `.git/info/exclude` to it. The script only links when
-# `.gitignore.local` exists and info/exclude is still Git's default
-# stub (custom excludes are preserved, and linked worktrees are skipped
+# `.gitignore.local` exists and info/exclude is missing or still Git's
+# default stub (custom excludes are preserved; linked worktrees are skipped
 # since they share info/exclude) — so if you create `.gitignore.local`
 # later, rerun the script from the primary checkout. The template
 # ignores the file so it never lands in git. This
