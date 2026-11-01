@@ -13349,9 +13349,9 @@
       "node_type": "action",
       "title": "Batch record_classification_verdicts into a single UPDATE per burst batch (#417)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-31T12:09:21.564147-07:00",
-      "updated_at": "2026-10-31T12:09:21.564147-07:00",
+      "updated_at": "2026-10-31T13:18:26.877398-07:00",
       "metadata_json": "{\"branch\":\"fix/417-batch-verdict-writes\",\"commit\":\"cfeac01\",\"confidence\":85,\"files\":[\"src/db/postgres.rs\",\"src/db/sqlite.rs\"]}"
     },
     {
@@ -13360,10 +13360,76 @@
       "node_type": "outcome",
       "title": "Batch verdict write implemented: one UPDATE FROM UNNEST, last-write-wins; test mutation-checked; clippy clean",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-31T12:38:38.605113-07:00",
-      "updated_at": "2026-10-31T12:38:38.605113-07:00",
+      "updated_at": "2026-10-31T13:18:26.885146-07:00",
       "metadata_json": "{\"branch\":\"fix/417-batch-verdict-writes\",\"commit\":\"2b87e30\",\"confidence\":90}"
+    },
+    {
+      "id": 1225,
+      "change_id": "aa76abbf-11cb-4ccf-aa69-f9a07a52d478",
+      "node_type": "outcome",
+      "title": "PR #154 merged to staging (9e37feb); CI green, CodeRabbit approved",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-10-31T13:18:24.241329-07:00",
+      "updated_at": "2026-10-31T13:18:26.892472-07:00",
+      "metadata_json": "{\"branch\":\"fix/417-batch-verdict-writes\",\"commit\":\"9e37feb\",\"confidence\":95}"
+    },
+    {
+      "id": 1226,
+      "change_id": "da2a9631-5d36-4405-bff8-dcff427f6963",
+      "node_type": "outcome",
+      "title": "Staging grimalkina validation: 30 min, GPU <5 min, $2.37 billed = 0.0117c/cls (5.3x cheaper than prod); leftover = worker over-provisioning",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-01T15:07:27.834545-08:00",
+      "updated_at": "2026-11-01T15:07:27.834545-08:00",
+      "metadata_json": "{\"branch\":\"fix/417-batch-verdict-writes\",\"confidence\":90}"
+    },
+    {
+      "id": 1227,
+      "change_id": "0b8ca8ad-ff59-442d-a29c-e919eb2cfced",
+      "node_type": "action",
+      "title": "Cap RunPod endpoint f39lf61pc762a8 max workers 10 -> 3 (Bryan OK 2026-11-01)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-01T15:17:43.602771-08:00",
+      "updated_at": "2026-11-01T15:17:43.602771-08:00",
+      "metadata_json": "{\"branch\":\"fix/417-batch-verdict-writes\",\"commit\":\"1b8610b\",\"confidence\":85}"
+    },
+    {
+      "id": 1228,
+      "change_id": "9f4b37dd-7766-4f6b-a350-b23153cd08ab",
+      "node_type": "outcome",
+      "title": "RunPod max workers now 3 (verified)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-01T15:17:52.577686-08:00",
+      "updated_at": "2026-11-01T15:17:52.577686-08:00",
+      "metadata_json": "{\"branch\":\"fix/417-batch-verdict-writes\",\"confidence\":90}"
+    },
+    {
+      "id": 1229,
+      "change_id": "d27f9bab-e164-41bd-91e7-cecf31944215",
+      "node_type": "action",
+      "title": "Fix cloud-setup.sh cached cf vs lockfile (#418, PR #156) to clear CodeRabbit on promotion PR #155",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-01T15:27:39.177483-08:00",
+      "updated_at": "2026-11-01T15:27:39.177483-08:00",
+      "metadata_json": "{\"branch\":\"fix/418-cloud-setup-lockfile\",\"commit\":\"8bcf181\",\"confidence\":85,\"files\":[\".claude/hooks/cloud-setup.sh\"]}"
+    },
+    {
+      "id": 1230,
+      "change_id": "9b3814c1-e1c5-4189-a13e-4cb672b3d99c",
+      "node_type": "outcome",
+      "title": "Upstreamed cloud-setup lockfile fix to project-template PR #44 with regression test",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-01T15:34:59.830689-08:00",
+      "updated_at": "2026-11-01T15:34:59.830689-08:00",
+      "metadata_json": "{\"branch\":\"fix/418-cloud-setup-lockfile\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -27314,6 +27380,61 @@
       "weight": 1.0,
       "rationale": "Follow-up from the region-move root cause: make the burst insensitive to DB latency",
       "created_at": "2026-10-31T12:38:42.313854-07:00"
+    },
+    {
+      "id": 1279,
+      "from_node_id": 1224,
+      "to_node_id": 1225,
+      "from_change_id": "31ef79c6-b2b9-4520-8cb1-b8b3ef96b297",
+      "to_change_id": "aa76abbf-11cb-4ccf-aa69-f9a07a52d478",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Merged after review",
+      "created_at": "2026-10-31T13:18:26.869723-07:00"
+    },
+    {
+      "id": 1280,
+      "from_node_id": 1225,
+      "to_node_id": 1226,
+      "from_change_id": "aa76abbf-11cb-4ccf-aa69-f9a07a52d478",
+      "to_change_id": "da2a9631-5d36-4405-bff8-dcff427f6963",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Validation scan of the merged fix",
+      "created_at": "2026-11-01T15:07:31.898071-08:00"
+    },
+    {
+      "id": 1281,
+      "from_node_id": 1226,
+      "to_node_id": 1227,
+      "from_change_id": "da2a9631-5d36-4405-bff8-dcff427f6963",
+      "to_change_id": "0b8ca8ad-ff59-442d-a29c-e919eb2cfced",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Leftover overspend is worker over-provisioning",
+      "created_at": "2026-11-01T15:17:43.627070-08:00"
+    },
+    {
+      "id": 1282,
+      "from_node_id": 1227,
+      "to_node_id": 1228,
+      "from_change_id": "0b8ca8ad-ff59-442d-a29c-e919eb2cfced",
+      "to_change_id": "9f4b37dd-7766-4f6b-a350-b23153cd08ab",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Applied",
+      "created_at": "2026-11-01T15:17:52.594541-08:00"
+    },
+    {
+      "id": 1283,
+      "from_node_id": 1229,
+      "to_node_id": 1230,
+      "from_change_id": "d27f9bab-e164-41bd-91e7-cecf31944215",
+      "to_change_id": "9b3814c1-e1c5-4189-a13e-4cb672b3d99c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Upstream so template sync doesn't revert it",
+      "created_at": "2026-11-01T15:35:01.745420-08:00"
     }
   ],
   "documents": [

@@ -1,5 +1,29 @@
 [
   {
+    "hash": "8bcf18188b7fa75fbac665de3b48896bc5997175",
+    "short_hash": "8bcf181",
+    "author": "Bryan Guffey",
+    "date": "2026-11-01T15:27:23-08:00",
+    "message": "fix(418): reinstall the cached cf when the lockfile changes\n\ncloud-setup.sh trusted a cached install whenever its cf reported the\npinned version. A lockfile bump that keeps cf at the pin but changes its\ndependencies left the session on the old, unreviewed tree. Now the cache\nis reused only when its copy of package-lock.json matches the committed\none, both in install_cf and in the outer fast path when the cf on PATH is\nours (a sandbox-shipped cf is left alone).\n\nTested with a simulated cloud session and a fake npm: first run installs,\nan unchanged lock reuses the cache, a changed lock reinstalls via either\npath. The same fix belongs upstream in project-template, or the next\ntemplate sync reverts it. (CodeRabbit, PR #155.)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "9e37feb230343f8a611738df42629d08e0a9742b",
+    "short_hash": "9e37feb",
+    "author": "Bryan Guffey",
+    "date": "2026-10-31T13:18:18-07:00",
+    "message": "Merge pull request #154 from musicjunkieg/fix/417-batch-verdict-writes\n\nfix(417): write a burst batch of verdicts in one UPDATE",
+    "files_changed": 0
+  },
+  {
+    "hash": "1b8610b8ee39309101ef52178a07cbbfbf275739",
+    "short_hash": "1b8610b",
+    "author": "Bryan Guffey",
+    "date": "2026-10-31T13:07:40-07:00",
+    "message": "test(417): pin the account in the verdict match\n\nA second account sharing post 0's URI must stay pending. Without it the\ntest passed even with the account_did join dropped (CodeRabbit, PR #154);\nmutation-checked that it now fails.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 1
+  },
+  {
     "hash": "2b87e308fb2fad9ec1769aa9e454c11158ec6a10",
     "short_hash": "2b87e30",
     "author": "Bryan Guffey",
@@ -29,6 +53,14 @@
     "author": "Bryan Guffey",
     "date": "2026-10-29T11:27:18-07:00",
     "message": "Merge pull request #142 from musicjunkieg/chore/template-sync-cf-cli",
+    "files_changed": 0
+  },
+  {
+    "hash": "6b37e35504f7f3b01c6324d4f0d2ca26a9abc86b",
+    "short_hash": "6b37e35",
+    "author": "Bryan Guffey",
+    "date": "2026-10-27T22:41:06-07:00",
+    "message": "Merge pull request #151 from musicjunkieg/staging\n\nchore: promote staging to prod (#393 cost ledger, #408, #404 eval, #411)",
     "files_changed": 0
   },
   {

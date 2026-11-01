@@ -36,14 +36,35 @@ cf_is_pinned() {
             | awk -v want="v$CF_PIN" '{ for (i = 1; i <= NF; i++) if ($i == want) ok = 1 } END { exit !ok }'
 }
 
+# True when the cached install was made from the committed lockfile. The cf
+# version alone cannot tell: a lock bump can change cf's dependencies while
+# cf itself stays at the pin, and the cache must then be rebuilt. The
+# marker matters because the lock is staged into the cache BEFORE npm ci:
+# an install that fails or is killed leaves a matching lock over the old
+# tree, and only the marker (written last) says the tree is the new one.
+cache_matches_lock() {
+    [ -f "$DEST/.install-complete" ] \
+        && cmp -s "$SRC/package-lock.json" "$DEST/package-lock.json"
+}
+
+# True when the cf on PATH is the one from our cache (through our symlink or
+# the env-file PATH entry), as opposed to a cf the sandbox shipped with.
+cf_is_cached() {
+    local on_path
+    on_path=$(command -v cf 2>/dev/null) || return 1
+    [ "$(readlink -f "$on_path" 2>/dev/null)" = "$(readlink -f "$DEST/node_modules/.bin/cf" 2>/dev/null)" ]
+}
+
 install_cf() {
     local bindir
     [ -n "$CF_PIN" ] && [ -f "$SRC/package-lock.json" ] || { echo "no cloud-tools/package.json + package-lock.json"; return 1; }
-    if ! cf_is_pinned "$DEST/node_modules/.bin/cf"; then
+    if ! cf_is_pinned "$DEST/node_modules/.bin/cf" || ! cache_matches_lock; then
+        rm -f "$DEST/.install-complete" || { echo "could not invalidate $DEST"; return 1; }
         command -v npm >/dev/null 2>&1 || { echo "npm not found"; return 1; }
         mkdir -p "$DEST" && cp "$SRC/package.json" "$SRC/package-lock.json" "$DEST/" || { echo "could not stage $DEST"; return 1; }
         (cd "$DEST" && npm ci --ignore-scripts --no-audit --no-fund >/dev/null 2>&1) || { echo "'npm ci' failed (lockfile mismatch or registry unreachable)"; return 1; }
         cf_is_pinned "$DEST/node_modules/.bin/cf" || { echo "installed cf does not report v$CF_PIN"; return 1; }
+        : > "$DEST/.install-complete" || { echo "could not mark $DEST complete"; return 1; }
     fi
     # Put it on PATH: link into a bin dir that is already there (next to
     # npm, or ~/.local/bin). Only into a vacant slot or over our own
@@ -70,7 +91,7 @@ install_cf() {
     return 1
 }
 
-if ! cf_is_pinned; then
+if ! cf_is_pinned || { cf_is_cached && ! cache_matches_lock; }; then
     if reason=$(install_cf); then
         # install_cf ran in a subshell; mirror its env-file PATH fallback here.
         cf_is_pinned || PATH="$DEST/node_modules/.bin:$PATH"
