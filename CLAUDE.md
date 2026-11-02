@@ -54,7 +54,8 @@ next time. Break large tasks into Chainlink issues with subissues.
 
 **TDD workflow.** Write/finalize the spec, produce a test-driven implementation
 plan, then implement. Always leave a handoff note at the end of planning
-sessions.
+sessions. Tests follow the **Testing rules** below (properties, fuzzing,
+mutation testing), not example snapshots.
 
 **CRITICAL: Deciduous decision logging is mandatory — not aspirational.**
 Use Deciduous (https://crates.io/crates/deciduous) to log every meaningful
@@ -94,6 +95,43 @@ This is a Rust project. Follow idiomatic Rust patterns:
 Tests live in `tests/` (see the filenames — they're named by area) plus inline
 `#[cfg(test)]` modules. `cargo test` runs unit, doc, and integration tests; use
 `cargo test --all-targets` in CI so benches and examples also compile.
+
+#### Testing rules
+
+- Do NOT write example-based unit tests that assert current output.
+  Scratch tests while developing are fine; delete them before finishing.
+- For pure functions: write property tests (fast-check / proptest).
+  State the invariant in a comment before writing the test.
+- After implementing a function, run it live with real inputs and
+  show me the actual output.
+- Parsers, decoders, anything taking untrusted input (CIDs, CAR files,
+  lexicon records): add a fuzz target.
+- Before calling a task done: run mutation testing on changed files
+  (Stryker / cargo-mutants). Kill surviving mutants with new property
+  tests or explain why each survivor is equivalent.
+- Never "fix" a failing test by changing its expected value without
+  telling me why the old expectation was wrong.
+
+How these apply in this repo (decided 2026-11-01, #419):
+
+- **They govern new and changed code.** The existing example-based suite is
+  not deleted wholesale. When you change a function that an example test
+  covers, replace that test with properties where the function is pure.
+- **Code that is not a pure function** (database methods, HTTP handlers, the
+  scan pipeline) still gets integration tests, but each assertion must state
+  the requirement it checks in a comment, never "whatever it returns today".
+  Mutation-check them: break the code on purpose and show the test fails.
+- **TDD still holds:** write the invariant and its property test first.
+- **Untrusted input here** is mostly not CIDs or CAR files (Charcoal parses
+  neither today). It is: RunPod response bodies (`parse_batch_response`),
+  Bluesky and Constellation JSON, AT URIs, DIDs and handles, session cookies,
+  query strings (`normalize_query`), and env-var values parsed at startup
+  (`parse_refresh_interval`, `parse_onnx_sessions`). These get fuzz targets.
+- **Mutation testing is scoped to the diff**, which keeps it consistent with
+  not hand-running full suites: `cargo mutants --in-diff <diff file>` for
+  Rust, Stryker with `--mutate <changed files>` for `web/`.
+- **If a required tool is not installed, stop and say so.** Do not skip the
+  step silently or report the task done without it.
 
 **⚠️ Model-gated tests silently skip and still print `ok`.** Every test that
 loads a real ONNX model returns early when the model files aren't found, having

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "4e7db44ac4fa7f9768a3c31e1c2066f5d86f65d4",
+    "short_hash": "4e7db44",
+    "author": "Bryan Guffey",
+    "date": "2026-11-01T15:53:30-08:00",
+    "message": "Merge pull request #155 from musicjunkieg/staging\n\nPromote staging to main: batched verdict writes (#417)",
+    "files_changed": 0
+  },
+  {
     "hash": "8bcf18188b7fa75fbac665de3b48896bc5997175",
     "short_hash": "8bcf181",
     "author": "Bryan Guffey",
