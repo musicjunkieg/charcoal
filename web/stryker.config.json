@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  },
+  "reporters": [
+    "clear-text",
+    "progress"
+  ],
+  "tempDirName": ".stryker-tmp",
+  "ignorePatterns": [
+    "!.svelte-kit/tsconfig.json",
+    "!.svelte-kit/ambient.d.ts",
+    "!.svelte-kit/non-ambient.d.ts",
+    "!.svelte-kit/types/**"
+  ],
+  "_comment": "Mutation testing (#420). Scope every run to changed files: npx stryker run --mutate src/lib/foo.ts. The .svelte-kit files are un-ignored because tsconfig.json extends .svelte-kit/tsconfig.json; run `npx svelte-kit sync` first on a fresh checkout."
+}

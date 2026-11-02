@@ -154,6 +154,8 @@ version = "0.10"
 optional = true
 
 [dev-dependencies]
+# Property-based tests for pure functions (#420; CLAUDE.md "Testing rules").
+proptest = "1.12"
 tower = "0.5"
 tempfile = "3"
 serial_test = "3"

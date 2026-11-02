@@ -13382,9 +13382,9 @@
       "node_type": "outcome",
       "title": "Staging grimalkina validation: 30 min, GPU <5 min, $2.37 billed = 0.0117c/cls (5.3x cheaper than prod); leftover = worker over-provisioning",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-11-01T15:07:27.834545-08:00",
-      "updated_at": "2026-11-01T15:07:27.834545-08:00",
+      "updated_at": "2026-11-01T15:58:56.012311-08:00",
       "metadata_json": "{\"branch\":\"fix/417-batch-verdict-writes\",\"confidence\":90}"
     },
     {
@@ -13393,9 +13393,9 @@
       "node_type": "action",
       "title": "Cap RunPod endpoint f39lf61pc762a8 max workers 10 -> 3 (Bryan OK 2026-11-01)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-11-01T15:17:43.602771-08:00",
-      "updated_at": "2026-11-01T15:17:43.602771-08:00",
+      "updated_at": "2026-11-01T15:58:56.017978-08:00",
       "metadata_json": "{\"branch\":\"fix/417-batch-verdict-writes\",\"commit\":\"1b8610b\",\"confidence\":85}"
     },
     {
@@ -13404,9 +13404,9 @@
       "node_type": "outcome",
       "title": "RunPod max workers now 3 (verified)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-11-01T15:17:52.577686-08:00",
-      "updated_at": "2026-11-01T15:17:52.577686-08:00",
+      "updated_at": "2026-11-01T15:58:56.023630-08:00",
       "metadata_json": "{\"branch\":\"fix/417-batch-verdict-writes\",\"confidence\":90}"
     },
     {
@@ -13415,9 +13415,9 @@
       "node_type": "action",
       "title": "Fix cloud-setup.sh cached cf vs lockfile (#418, PR #156) to clear CodeRabbit on promotion PR #155",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-11-01T15:27:39.177483-08:00",
-      "updated_at": "2026-11-01T15:27:39.177483-08:00",
+      "updated_at": "2026-11-01T15:58:56.029563-08:00",
       "metadata_json": "{\"branch\":\"fix/418-cloud-setup-lockfile\",\"commit\":\"8bcf181\",\"confidence\":85,\"files\":[\".claude/hooks/cloud-setup.sh\"]}"
     },
     {
@@ -13426,10 +13426,32 @@
       "node_type": "outcome",
       "title": "Upstreamed cloud-setup lockfile fix to project-template PR #44 with regression test",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-11-01T15:34:59.830689-08:00",
-      "updated_at": "2026-11-01T15:34:59.830689-08:00",
+      "updated_at": "2026-11-01T15:58:56.035411-08:00",
       "metadata_json": "{\"branch\":\"fix/418-cloud-setup-lockfile\",\"confidence\":90}"
+    },
+    {
+      "id": 1231,
+      "change_id": "35070e03-50cc-4e49-b32d-bbb9e933075c",
+      "node_type": "outcome",
+      "title": "Promotion PR #155 on prod (4e7db44, deploy 422d6d5c): health 200, schema 20, no errors",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-11-01T15:58:55.963435-08:00",
+      "updated_at": "2026-11-01T15:58:56.051614-08:00",
+      "metadata_json": "{\"branch\":\"fix/418-cloud-setup-lockfile\",\"commit\":\"4e7db44\",\"confidence\":95}"
+    },
+    {
+      "id": 1232,
+      "change_id": "92ab6a61-3677-4ab0-b7a2-f437c1dbaf45",
+      "node_type": "action",
+      "title": "Testing tooling (#420): proptest + fuzz crate + cargo-mutants + fast-check/Stryker, each proven on one real function",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-01T16:35:35.509757-08:00",
+      "updated_at": "2026-11-01T16:35:35.509757-08:00",
+      "metadata_json": "{\"branch\":\"chore/420-testing-tooling\",\"commit\":\"6920701\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -27435,6 +27457,28 @@
       "weight": 1.0,
       "rationale": "Upstream so template sync doesn't revert it",
       "created_at": "2026-11-01T15:35:01.745420-08:00"
+    },
+    {
+      "id": 1284,
+      "from_node_id": 1230,
+      "to_node_id": 1231,
+      "from_change_id": "9b3814c1-e1c5-4189-a13e-4cb672b3d99c",
+      "to_change_id": "35070e03-50cc-4e49-b32d-bbb9e933075c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Promotion completed after the hook fix cleared review",
+      "created_at": "2026-11-01T15:58:55.989199-08:00"
+    },
+    {
+      "id": 1285,
+      "from_node_id": 1226,
+      "to_node_id": 1231,
+      "from_change_id": "da2a9631-5d36-4405-bff8-dcff427f6963",
+      "to_change_id": "35070e03-50cc-4e49-b32d-bbb9e933075c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Validated fix shipped to prod",
+      "created_at": "2026-11-01T15:58:56.006330-08:00"
     }
   ],
   "documents": [

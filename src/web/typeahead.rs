@@ -152,3 +152,57 @@ impl TypeaheadLimiter {
         }
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        // Invariant 1: an accepted query is exactly the input with surrounding
+        // whitespace removed, and its length in chars is within
+        // MIN_QUERY_CHARS..=MAX_QUERY_CHARS. Nothing else is altered.
+        #[test]
+        fn accepted_query_is_the_trimmed_input_within_bounds(raw in "\\PC{0,300}") {
+            if let Some(q) = normalize_query(&raw) {
+                prop_assert_eq!(q.as_str(), raw.trim());
+                let n = q.chars().count();
+                prop_assert!((MIN_QUERY_CHARS..=MAX_QUERY_CHARS).contains(&n));
+            }
+        }
+
+        // Invariant 2: a query is rejected only when its trimmed length is out
+        // of bounds, so every in-bounds query reaches upstream.
+        #[test]
+        fn rejected_only_when_trimmed_length_out_of_bounds(raw in "\\PC{0,300}") {
+            let n = raw.trim().chars().count();
+            let in_bounds = (MIN_QUERY_CHARS..=MAX_QUERY_CHARS).contains(&n);
+            prop_assert_eq!(normalize_query(&raw).is_some(), in_bounds);
+        }
+
+        // Invariant 3: surrounding whitespace never changes the outcome, and
+        // normalizing an accepted query again is a no-op (idempotent).
+        #[test]
+        fn padding_is_irrelevant_and_normalizing_is_idempotent(
+            core in "\\PC{0,300}",
+            pad_l in "[ \\t\\n]{0,5}",
+            pad_r in "[ \\t\\n]{0,5}",
+        ) {
+            let padded = format!("{pad_l}{core}{pad_r}");
+            prop_assert_eq!(normalize_query(&padded), normalize_query(&core));
+            if let Some(q) = normalize_query(&core) {
+                prop_assert_eq!(normalize_query(&q), Some(q.clone()));
+            }
+        }
+
+        // Invariant 4: the char count, not the byte count, is what is bounded,
+        // so a multi-byte handle at the maximum length is still accepted.
+        #[test]
+        fn bound_counts_chars_not_bytes(c in "[é漢🦀]", extra in 0usize..3) {
+            let at_max: String = std::iter::repeat_n(c.chars().next().unwrap(), MAX_QUERY_CHARS).collect();
+            prop_assert!(normalize_query(&at_max).is_some());
+            let over: String = std::iter::repeat_n('a', MAX_QUERY_CHARS + 1 + extra).collect();
+            prop_assert!(normalize_query(&over).is_none());
+        }
+    }
+}
