@@ -9,6 +9,7 @@
 # 1. fuzz/ is its own crate with its own Cargo.lock. Left alone it resolves
 #    newer versions than the app (ort 2.0.0-rc.15 instead of rc.11 broke the
 #    build, #420), so the app's Cargo.lock is copied in before every run.
+#    That copy is generated, so it is gitignored (fuzz/.gitignore).
 #
 # 2. cargo-fuzz needs unstable compiler flags (-Zsanitizer=address). The
 #    nightly toolchain current on 2026-11-01 (1.101.0-nightly f9ceb4a4d) hits
@@ -34,9 +35,12 @@ cp Cargo.lock fuzz/Cargo.lock
 # The committed seeds are read-only examples of real responses; the corpus
 # directory (gitignored) is where libFuzzer saves the inputs it discovers.
 mkdir -p "fuzz/corpus/$TARGET"
+# The ${SEEDS[@]+...} form below is not decoration: macOS ships bash 3.2,
+# where expanding an EMPTY array under `set -u` is an "unbound variable"
+# error, so a target without a seeds directory would fail to start.
 SEEDS=()
-[ -d "fuzz/seeds/$TARGET" ] && SEEDS=("fuzz/seeds/$TARGET")
+if [ -d "fuzz/seeds/$TARGET" ]; then SEEDS=("fuzz/seeds/$TARGET"); fi
 
 RUSTC_BOOTSTRAP=1 cargo +stable fuzz run "$TARGET" \
-    "fuzz/corpus/$TARGET" "${SEEDS[@]}" \
+    "fuzz/corpus/$TARGET" ${SEEDS[@]+"${SEEDS[@]}"} \
     -- -max_total_time="$SECONDS_TO_RUN"
