@@ -13441,6 +13441,39 @@
       "created_at": "2026-11-01T15:58:55.963435-08:00",
       "updated_at": "2026-11-01T15:58:56.051614-08:00",
       "metadata_json": "{\"branch\":\"fix/418-cloud-setup-lockfile\",\"commit\":\"4e7db44\",\"confidence\":95}"
+    },
+    {
+      "id": 1232,
+      "change_id": "92ab6a61-3677-4ab0-b7a2-f437c1dbaf45",
+      "node_type": "action",
+      "title": "Testing tooling (#420): proptest + fuzz crate + cargo-mutants + fast-check/Stryker, each proven on one real function",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-01T16:35:35.509757-08:00",
+      "updated_at": "2026-11-01T16:35:35.509757-08:00",
+      "metadata_json": "{\"branch\":\"chore/420-testing-tooling\",\"commit\":\"6920701\",\"confidence\":85}"
+    },
+    {
+      "id": 1233,
+      "change_id": "7ce483d3-f349-4899-9da4-f404a1e022d4",
+      "node_type": "outcome",
+      "title": "Testing tooling PR #158: proptest/fast-check/Stryker/cargo-mutants/cargo-fuzz each proven on one function",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-01T17:55:01.237252-08:00",
+      "updated_at": "2026-11-01T17:55:01.237252-08:00",
+      "metadata_json": "{\"branch\":\"chore/420-testing-tooling\",\"commit\":\"4b96b55\",\"confidence\":85}"
+    },
+    {
+      "id": 1234,
+      "change_id": "6a2ebe66-29ac-4e2a-822d-52ff4ea1de47",
+      "node_type": "observation",
+      "title": "Prod chaosgreml.in scan: $0.74 for 1,400 cls (0.053c); ~$0.58 is fixed per-scan overhead (probe cold boot + second cold boot after gather gap)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-01T17:55:27.376396-08:00",
+      "updated_at": "2026-11-01T17:55:27.376396-08:00",
+      "metadata_json": "{\"branch\":\"chore/420-testing-tooling\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -27468,6 +27501,28 @@
       "weight": 1.0,
       "rationale": "Validated fix shipped to prod",
       "created_at": "2026-11-01T15:58:56.006330-08:00"
+    },
+    {
+      "id": 1286,
+      "from_node_id": 1232,
+      "to_node_id": 1233,
+      "from_change_id": "92ab6a61-3677-4ab0-b7a2-f437c1dbaf45",
+      "to_change_id": "7ce483d3-f349-4899-9da4-f404a1e022d4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result",
+      "created_at": "2026-11-01T17:55:01.262439-08:00"
+    },
+    {
+      "id": 1287,
+      "from_node_id": 1231,
+      "to_node_id": 1234,
+      "from_change_id": "35070e03-50cc-4e49-b32d-bbb9e933075c",
+      "to_change_id": "6a2ebe66-29ac-4e2a-822d-52ff4ea1de47",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "First prod scan after promotion",
+      "created_at": "2026-11-01T17:55:27.395607-08:00"
     }
   ],
   "documents": [

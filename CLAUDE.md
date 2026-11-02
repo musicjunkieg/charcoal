@@ -172,6 +172,40 @@ role named after your OS account and no `charcoal` role, so that URL dies with
 the role once with `createuser -s charcoal`. If the database is missing,
 `createdb charcoal_test` first.
 
+#### Property, fuzz and mutation tooling (#420)
+
+- **Property tests** — Rust: `proptest` (dev-dependency), inline in a
+  `#[cfg(test)] mod props` next to the function (example:
+  `src/web/typeahead.rs`). Frontend: `fast-check`, in a
+  `*.property.test.ts` file (example: `web/src/lib/scan-costs.property.test.ts`).
+- **Fuzzing** — targets live in `fuzz/fuzz_targets/`, committed seed inputs
+  in `fuzz/seeds/<target>/`. Always run through the script, never plain
+  `cargo fuzz run`: it re-syncs `fuzz/Cargo.lock` from the app's lockfile and
+  works around a nightly compiler bug (details in the script header).
+  ```
+  scripts/fuzz.sh --list
+  scripts/fuzz.sh runpod_batch_response 120   # seconds
+  ```
+  A crash leaves the input in `fuzz/artifacts/<target>/`; turn it into a
+  failing test before fixing.
+- **Mutation testing, Rust** — scope to the changed files, and keep the
+  scratch output out of the repo:
+  ```
+  cargo mutants -f src/path/changed.rs --features web -o "$TMPDIR" -- --lib
+  ```
+  Add `--re <fn name>` to narrow to one function. Each mutant rebuilds the
+  crate (~30 s each with `web`), so a big file takes many minutes.
+- **Mutation testing, frontend** — Stryker, configured in
+  `web/stryker.config.json`. Run it in a SUBSHELL so the persistent shell
+  never parks in `web/` (a shell parked there makes chainlink create a stray
+  `web/.chainlink/`, and the work-check hook then blocks every command until
+  a human deletes it — happened 2026-11-01):
+  ```
+  (cd web && npx stryker run --mutate src/lib/changed.ts)
+  ```
+  On a fresh checkout run `(cd web && npx svelte-kit sync)` once first:
+  `web/tsconfig.json` extends the generated `.svelte-kit/tsconfig.json`.
+
 ### Git hooks
 
 After cloning, run `./scripts/install-hooks.sh` to install quality gates:

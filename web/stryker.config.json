@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  },
+  "reporters": [
+    "clear-text",
+    "progress"
+  ],
+  "tempDirName": ".stryker-tmp",
+  "ignorePatterns": [
+    "!.svelte-kit/tsconfig.json",
+    "!.svelte-kit/ambient.d.ts",
+    "!.svelte-kit/non-ambient.d.ts",
+    "!.svelte-kit/types/**"
+  ]
+}
