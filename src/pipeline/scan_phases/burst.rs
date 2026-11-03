@@ -16,7 +16,10 @@
 //     are persisted, and the loop returns BurstOutcome::CostCapped.  Remaining
 //     pending rows stay pending so a future resume can finish them.
 //   - Any other classifier error records successes then propagates via Err.
+//   - After any stop (cost cap, transient interrupt, other error), chunks not
+//     yet started are skipped without contacting the classifier (#423).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -105,14 +108,27 @@ pub async fn run_burst(
         let chunks: Vec<Vec<(String, String, String)>> =
             items.chunks(batch_size).map(|c| c.to_vec()).collect();
 
+        // Set once any stop condition fires (cost cap, transient interrupt,
+        // permanent error). `buffer_unordered` starts a chunk's future only
+        // when it refills a slot, so a chunk that has not started yet sees
+        // the flag and returns `None` without contacting the GPU (#423).
+        // Without this, every remaining chunk of the batch was still sent and
+        // paid for, its answer thrown away, and, behind `CachedClassifier`,
+        // re-ran a failed identity probe (each waiting out the long warm-up
+        // timeout on a cold worker). Chunks already in flight finish normally.
+        let stop = Arc::new(AtomicBool::new(false));
         let mut stream = futures::stream::iter(chunks)
             .map(|chunk| {
                 let classifier = classifier.clone();
+                let stop = Arc::clone(&stop);
                 async move {
+                    if stop.load(Ordering::SeqCst) {
+                        return (chunk, None);
+                    }
                     let contents: Vec<String> =
                         chunk.iter().map(|(_, _, input)| input.clone()).collect();
                     let result = classifier.classify_batch(&contents).await;
-                    (chunk, result)
+                    (chunk, Some(result))
                 }
             })
             .buffer_unordered(burst_concurrency);
@@ -123,6 +139,8 @@ pub async fn run_burst(
         let mut other_error: Option<anyhow::Error> = None;
 
         while let Some((chunk, result)) = stream.next().await {
+            // A chunk skipped after a stop: its rows stay pending.
+            let Some(result) = result else { continue };
             match result {
                 Ok(outcomes) => {
                     // Once a stop condition fired, drain remaining chunks without
@@ -143,6 +161,7 @@ pub async fn run_burst(
                             got = outcomes.len(),
                             "RunPod batch length mismatch — contract violation, aborting after persisting prior successes"
                         );
+                        stop.store(true, Ordering::SeqCst);
                         if other_error.is_none() {
                             other_error = Some(anyhow::anyhow!(
                                 "RunPod batch length mismatch: {} verdicts for {} inputs",
@@ -192,6 +211,7 @@ pub async fn run_burst(
                     }
                 }
                 Err(err) => {
+                    stop.store(true, Ordering::SeqCst);
                     if err.downcast_ref::<CostCeilingExceeded>().is_some() {
                         cost_capped = true;
                     } else if err.downcast_ref::<ClassifierTransientError>().is_some() {

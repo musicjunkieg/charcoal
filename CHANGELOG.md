@@ -37,6 +37,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   post, on the same worker the burst then uses. An endpoint serving the wrong
   policy still stops the scan before any post is classified, but only after
   the gather.
+  Also, once the burst decides to stop (cost cap, a failed request, or a
+  refused probe), it no longer sends the rest of the batch to the GPU only to
+  throw the answers away; chunks not yet started are skipped and stay pending.
 - #344 — `charcoal migrate` copies every score row verbatim
   (`export_scores` / `import_score`), including expired, legacy and
   NotAssessed rows, with their original `scored_at`, revision stamp and

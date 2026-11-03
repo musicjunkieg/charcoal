@@ -2734,12 +2734,20 @@ mod burst_tests {
 
         // 3 Ok calls, then a transient error. concurrency=1 makes the 3 successes
         // land deterministically before the failure.
-        let classifier: Arc<dyn ToxicityClassifier> =
-            Arc::new(TransientFailClassifier::new(ok_verdict(), 3));
+        let transient = Arc::new(TransientFailClassifier::new(ok_verdict(), 3));
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::clone(&transient) as _;
 
         let outcome = run_burst(&db, BURST_USER, &classifier, 1, 100)
             .await
             .unwrap();
+        // #423: once the burst has decided to stop, it sends nothing more to
+        // the GPU. Calls 5 and 6 would be paid for and their answers thrown
+        // away (and, behind CachedClassifier, each would re-run the probe).
+        assert_eq!(
+            *transient.call_count.lock().unwrap(),
+            4,
+            "no chunk may be sent after the interrupting failure"
+        );
         assert!(
             matches!(outcome, BurstOutcome::Interrupted),
             "transient classifier error should interrupt resumably, got {:?}",
@@ -3010,6 +3018,7 @@ mod burst_tests {
     /// does, and counts every classify call it is asked to make.
     struct RefusingProbeClassifier {
         classified: AtomicUsize,
+        probes: AtomicUsize,
     }
 
     #[async_trait]
@@ -3019,6 +3028,7 @@ mod burst_tests {
             Ok(ok_verdict())
         }
         async fn probe_identity(&self) -> Result<()> {
+            self.probes.fetch_add(1, Ordering::SeqCst);
             anyhow::bail!("endpoint serves policy other-policy, deployment declares stub")
         }
         fn name(&self) -> &'static str {
@@ -3042,12 +3052,13 @@ mod burst_tests {
 
         let db = open_burst_db().await;
         let acct = "did:plc:burst010";
-        let rows: Vec<QueueRow> = (0..4).map(|i| pending_row(acct, &i.to_string())).collect();
+        let rows: Vec<QueueRow> = (0..6).map(|i| pending_row(acct, &i.to_string())).collect();
         db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
 
         // The production wrapper, which is where the lazy probe lives.
         let inner = Arc::new(RefusingProbeClassifier {
             classified: AtomicUsize::new(0),
+            probes: AtomicUsize::new(0),
         });
         let classifier: Arc<dyn ToxicityClassifier> = Arc::new(CachedClassifier::new(
             Arc::clone(&inner) as Arc<dyn ToxicityClassifier>,
@@ -3066,11 +3077,77 @@ mod burst_tests {
         );
         // Requirement: nothing was sent for classification.
         assert_eq!(inner.classified.load(Ordering::SeqCst), 0);
+        // Requirement: the refusal is not re-asked once per chunk. A failed
+        // probe is not memoised, so only the chunks already in flight when
+        // it failed (at most the concurrency, 2) may probe; the other four
+        // chunks must never start.
+        let probes = inner.probes.load(Ordering::SeqCst);
+        assert!(
+            (1..=2).contains(&probes),
+            "probed {probes} times for 6 chunks at concurrency 2"
+        );
         // Requirement: no row was recorded, so nothing foreign or sentinel
-        // can be scored and a fixed endpoint can redo all four.
+        // can be scored and a fixed endpoint can redo all six.
         assert_eq!(
             db.count_pending_classifications(BURST_USER).await.unwrap(),
-            4
+            6
+        );
+    }
+
+    /// Answers every request with one outcome too many, breaking the
+    /// positional contract, and counts the requests it was sent.
+    struct WrongLengthClassifier {
+        requests: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for WrongLengthClassifier {
+        async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+            Ok(ok_verdict())
+        }
+        async fn classify_batch(&self, contents: &[String]) -> Result<Vec<ItemOutcome>> {
+            self.requests.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![ItemOutcome::Verdict(ok_verdict()); contents.len() + 1])
+        }
+        fn name(&self) -> &'static str {
+            "wrong-length"
+        }
+        fn model_id(&self) -> &'static str {
+            "stub"
+        }
+        fn policy_version(&self) -> &'static str {
+            "stub"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+    }
+
+    // Requirement (#423): a batch-length contract violation aborts the burst
+    // AND stops it sending more chunks, like any other stop. One bad answer
+    // already proves the endpoint is broken; paying for five more is waste.
+    #[tokio::test]
+    async fn a_length_mismatch_aborts_without_sending_further_chunks() {
+        let db = open_burst_db().await;
+        let acct = "did:plc:burst011";
+        let rows: Vec<QueueRow> = (0..6).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        let inner = Arc::new(WrongLengthClassifier {
+            requests: AtomicUsize::new(0),
+        });
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::clone(&inner) as _;
+
+        // Concurrency 1 makes "the first answer arrives before any other
+        // chunk starts" deterministic.
+        let err = run_burst(&db, BURST_USER, &classifier, 1, 100)
+            .await
+            .expect_err("a length mismatch must abort the burst");
+        assert!(format!("{err:#}").contains("length mismatch"), "{err:#}");
+        assert_eq!(inner.requests.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            db.count_pending_classifications(BURST_USER).await.unwrap(),
+            6
         );
     }
 

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "02e21a3b5b8ac01b2526a922e2b6ab15c3ca70b0",
+    "short_hash": "02e21a3",
+    "author": "Bryan Guffey",
+    "date": "2026-11-02T23:07:49-08:00",
+    "message": "perf(423): probe CoPE-B on the burst's first miss, not before the gather\n\nThe full scan probed the endpoint before gathering. That woke a worker\nwhich idled out during the gather, so the burst paid a second cold boot\n(~$0.30 per scan on the 2026-11-01 prod bill). The scan now relies on the\nlazy probe CachedClassifier already pays on its first cache miss, on the\nworker the burst then reuses.\n\nA wrong policy is still refused before any post is classified (#344 F5),\nnow after the gather. New test drives run_burst through the real\nCachedClassifier with a refusing probe: Err with the reason, zero classify\ncalls, every row still pending. Mutation-checked: cached_classifier probe\nand classify_batch mutants all caught.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 12
+  },
+  {
     "hash": "60510978f07a56833ca43aa326065851144ad0e2",
     "short_hash": "6051097",
     "author": "Bryan Guffey",
