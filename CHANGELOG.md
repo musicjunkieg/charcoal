@@ -30,6 +30,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   run refuses to start without `CHARCOAL_COPE_B_POLICY_VERSION`.
 
 ### Changed
+- #423 — a full scan no longer checks the GPU endpoint's identity before it
+  gathers. That check woke a worker which idled out during the gather, so the
+  classification burst paid a second cold boot (~$0.30 per scan on the
+  2026-11-01 prod bill). The check now runs on the burst's first uncached
+  post, on the same worker the burst then uses. An endpoint serving the wrong
+  policy still stops the scan before any post is classified, but only after
+  the gather.
+  Also, once the burst decides to stop (cost cap, a failed request, or a
+  refused probe), it no longer sends the rest of the batch to the GPU only to
+  throw the answers away; chunks not yet started are skipped and stay pending.
 - #344 — `charcoal migrate` copies every score row verbatim
   (`export_scores` / `import_score`), including expired, legacy and
   NotAssessed rows, with their original `scored_at`, revision stamp and

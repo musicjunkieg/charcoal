@@ -281,11 +281,15 @@ binary recognises. So a mismatched value means every Stage-2 verdict is foreign
 evidence: every account is re-gathered once and then skipped, and no scores are
 written. To make that cheap to find rather than expensive to discover:
 
-- **the web scan paths probe the endpoint before they gather anything** and
-  refuse to start, naming both values and this variable. That is a scan
+- **the web scan paths probe the endpoint before they classify anything** and
+  fail the scan, naming both values and this variable. That is a scan
   started from the dashboard (`src/web/scan_job.rs`) and the nightly refresh
-  job (`src/web/refresh_scan.rs`, which probes whenever it actually has work
-  to do — candidates due, or its own resumable staging to finish);
+  job (`src/web/refresh_scan.rs`). The probe is the first contact of the run
+  with the endpoint: it happens on the first post that is not already in the
+  verdict cache, right before that post would be classified (#394, #423). A
+  dashboard scan therefore still gathers first and only then refuses; that
+  costs Bluesky fetching time but no GPU work, and saves a second cold boot
+  on every correctly configured scan;
 - **the CLI does not probe.** `charcoal scan` and `charcoal sweep`
   (`src/main.rs`) call the pipelines directly, with no probe in front of them.
   On those two commands a wrong value still costs what the probe exists to

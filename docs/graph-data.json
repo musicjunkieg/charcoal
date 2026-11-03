@@ -13448,9 +13448,9 @@
       "node_type": "action",
       "title": "Testing tooling (#420): proptest + fuzz crate + cargo-mutants + fast-check/Stryker, each proven on one real function",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-11-01T16:35:35.509757-08:00",
-      "updated_at": "2026-11-01T16:35:35.509757-08:00",
+      "updated_at": "2026-11-01T18:54:57.190085-08:00",
       "metadata_json": "{\"branch\":\"chore/420-testing-tooling\",\"commit\":\"6920701\",\"confidence\":85}"
     },
     {
@@ -13459,9 +13459,9 @@
       "node_type": "outcome",
       "title": "Testing tooling PR #158: proptest/fast-check/Stryker/cargo-mutants/cargo-fuzz each proven on one function",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-11-01T17:55:01.237252-08:00",
-      "updated_at": "2026-11-01T17:55:01.237252-08:00",
+      "updated_at": "2026-11-01T18:54:57.195928-08:00",
       "metadata_json": "{\"branch\":\"chore/420-testing-tooling\",\"commit\":\"4b96b55\",\"confidence\":85}"
     },
     {
@@ -13474,6 +13474,39 @@
       "created_at": "2026-11-01T17:55:27.376396-08:00",
       "updated_at": "2026-11-01T17:55:27.376396-08:00",
       "metadata_json": "{\"branch\":\"chore/420-testing-tooling\",\"confidence\":85}"
+    },
+    {
+      "id": 1235,
+      "change_id": "6bd48169-25cc-4c1e-856b-e2bd921dc602",
+      "node_type": "outcome",
+      "title": "Testing rules (#157) + tooling (#158) merged to staging",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-11-01T18:54:57.156460-08:00",
+      "updated_at": "2026-11-01T18:54:57.211978-08:00",
+      "metadata_json": "{\"branch\":\"chore/420-testing-tooling\",\"confidence\":95}"
+    },
+    {
+      "id": 1236,
+      "change_id": "107a2f5e-10b3-47ae-87e8-f52881ac2e55",
+      "node_type": "action",
+      "title": "Move full-scan CoPE-B identity probe to the burst's first miss (#423)",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-11-02T22:56:29.856601-08:00",
+      "updated_at": "2026-11-02T23:08:05.303377-08:00",
+      "metadata_json": "{\"branch\":\"perf/423-probe-before-burst\",\"commit\":\"6051097\",\"confidence\":85,\"files\":[\"src/web/scan_job.rs\",\"src/web/scan_setup.rs\",\"src/toxicity/cached_classifier.rs\",\"tests/unit_scan_phases.rs\"]}"
+    },
+    {
+      "id": 1237,
+      "change_id": "8d346b9e-2ed7-43cd-a2eb-4da919aae270",
+      "node_type": "outcome",
+      "title": "#423 probe moved to burst first miss; test + mutants pass",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-11-02T23:08:02.476659-08:00",
+      "updated_at": "2026-11-02T23:08:05.311200-08:00",
+      "metadata_json": "{\"branch\":\"perf/423-probe-before-burst\",\"commit\":\"02e21a3\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -27523,6 +27556,28 @@
       "weight": 1.0,
       "rationale": "First prod scan after promotion",
       "created_at": "2026-11-01T17:55:27.395607-08:00"
+    },
+    {
+      "id": 1288,
+      "from_node_id": 1233,
+      "to_node_id": 1235,
+      "from_change_id": "7ce483d3-f349-4899-9da4-f404a1e022d4",
+      "to_change_id": "6bd48169-25cc-4c1e-856b-e2bd921dc602",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Merged",
+      "created_at": "2026-11-01T18:54:57.183021-08:00"
+    },
+    {
+      "id": 1289,
+      "from_node_id": 1236,
+      "to_node_id": 1237,
+      "from_change_id": "107a2f5e-10b3-47ae-87e8-f52881ac2e55",
+      "to_change_id": "8d346b9e-2ed7-43cd-a2eb-4da919aae270",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation result",
+      "created_at": "2026-11-02T23:08:05.297199-08:00"
     }
   ],
   "documents": [
