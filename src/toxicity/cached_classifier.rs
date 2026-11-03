@@ -177,8 +177,9 @@ impl ToxicityClassifier for CachedClassifier {
     }
     /// Contacts the live endpoint — never answered from the verdict cache,
     /// whose rows are exactly the stale identity the probe checks for — but
-    /// at most once per run: the full scan's explicit fail-fast probe at start
-    /// IS the run's probe, so the first miss afterwards does not pay another.
+    /// at most once per run: an explicit probe IS the run's probe, so the
+    /// first miss afterwards does not pay another. (Scans no longer call this
+    /// up front — #423 — and rely on the first-miss probe instead.)
     async fn probe_identity(&self) -> anyhow::Result<()> {
         self.ensure_probed().await
     }

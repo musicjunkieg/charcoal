@@ -517,7 +517,7 @@ mod retry {
             "…and the variable to change: {msg}"
         );
 
-        // And the same refusal is what `probe_identity` hands the scan start.
+        // And the same refusal is what `probe_identity` hands the burst.
         let dyn_ref: &dyn ToxicityClassifier = &client;
         assert!(dyn_ref.probe_identity().await.is_err());
     }

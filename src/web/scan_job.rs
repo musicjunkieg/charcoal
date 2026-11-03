@@ -1390,7 +1390,8 @@ async fn run_scan_inner(
     let scorers = build_scan_scorers(&models, &db)?;
 
     // #393: the meter starts here, so even a scan refused by the Stage-2
-    // identity probe below leaves a cost row — that probe can wake a GPU.
+    // identity probe (paid on the burst's first cache miss, #423) leaves a
+    // cost row — that probe can wake a GPU.
     let started_at = crate::observability::scan_cost::now_rfc3339();
     let run = run_scan_body(
         config,
@@ -1444,10 +1445,12 @@ async fn run_scan_body(
     claim_id: &str,
     scorers: &crate::web::scan_setup::ScanScorers,
 ) -> anyhow::Result<FullScanRun> {
-    // #344 F5: refuse the scan now if the Stage-2 endpoint is not serving the
-    // policy this deployment declared. Discovering it in `map_verdicts`
-    // instead costs a full gather and then skips every account.
-    crate::web::scan_setup::probe_classifier_identity(scorers).await?;
+    // #423: no identity probe here. Probing before the gather woke a GPU
+    // worker that then idled out while the gather ran (minutes), so the burst
+    // cold-booted a second one: about $0.30 of every full scan. The probe now
+    // happens on the burst's first cache miss (`CachedClassifier`), on the
+    // worker the burst then reuses. A wrong policy is still refused before
+    // any post is classified (#344 F5); it just surfaces after the gather.
 
     // Phase 2: embedding model — loaded once at boot, shared via Arc::clone.
     //

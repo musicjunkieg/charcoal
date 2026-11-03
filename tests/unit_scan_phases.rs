@@ -2996,6 +2996,84 @@ mod burst_tests {
         );
     }
 
+    // ── Test: a refused identity probe stops the burst before any verdict ──
+    //
+    // #423: the full scan no longer probes the endpoint before it gathers.
+    // The probe now happens lazily, on the burst's first cache miss, so the
+    // worker it wakes is still warm for the burst instead of idling out
+    // during the gather and cold-booting a second time. That moves the
+    // #344 F5 guarantee here: an endpoint serving the wrong policy must
+    // refuse the scan before it classifies a single post, and every row
+    // must stay pending (no verdict, and no benign sentinel either).
+
+    /// Refuses its identity probe, as an endpoint serving another policy
+    /// does, and counts every classify call it is asked to make.
+    struct RefusingProbeClassifier {
+        classified: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for RefusingProbeClassifier {
+        async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+            self.classified.fetch_add(1, Ordering::SeqCst);
+            Ok(ok_verdict())
+        }
+        async fn probe_identity(&self) -> Result<()> {
+            anyhow::bail!("endpoint serves policy other-policy, deployment declares stub")
+        }
+        fn name(&self) -> &'static str {
+            "refusing-probe"
+        }
+        fn model_id(&self) -> &'static str {
+            "stub"
+        }
+        fn policy_version(&self) -> &'static str {
+            "stub"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+    }
+
+    #[tokio::test]
+    async fn a_refused_probe_aborts_the_burst_before_any_verdict() {
+        use charcoal::observability::cache_stats::CacheStats;
+        use charcoal::toxicity::cached_classifier::CachedClassifier;
+
+        let db = open_burst_db().await;
+        let acct = "did:plc:burst010";
+        let rows: Vec<QueueRow> = (0..4).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        // The production wrapper, which is where the lazy probe lives.
+        let inner = Arc::new(RefusingProbeClassifier {
+            classified: AtomicUsize::new(0),
+        });
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(CachedClassifier::new(
+            Arc::clone(&inner) as Arc<dyn ToxicityClassifier>,
+            Arc::clone(&db),
+            Arc::new(CacheStats::default()),
+        ));
+
+        // Requirement: the refusal fails the scan (an Err, not a resumable
+        // pause that would retry the same wrong endpoint forever).
+        let err = run_burst(&db, BURST_USER, &classifier, 2, 100)
+            .await
+            .expect_err("a refused probe must abort the burst");
+        assert!(
+            format!("{err:#}").contains("other-policy"),
+            "the refusal must reach the scan with its reason, got: {err:#}"
+        );
+        // Requirement: nothing was sent for classification.
+        assert_eq!(inner.classified.load(Ordering::SeqCst), 0);
+        // Requirement: no row was recorded, so nothing foreign or sentinel
+        // can be scored and a fixed endpoint can redo all four.
+        assert_eq!(
+            db.count_pending_classifications(BURST_USER).await.unwrap(),
+            4
+        );
+    }
+
     // ── Test: env helpers clamps and defaults ─────────────────────────────
     //
     // Env-var clamp tests are combined into a single test that runs all

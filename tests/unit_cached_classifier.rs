@@ -431,7 +431,7 @@ async fn the_first_miss_probes_once_before_classifying() {
     );
 }
 
-/// An explicit probe (the full scan's fail-fast check at start) counts as the
+/// An explicit `probe_identity` call (e.g. the eval runner's) counts as the
 /// run's probe: the first miss afterwards does not pay a second one.
 #[tokio::test]
 async fn an_explicit_probe_is_not_repeated_by_the_first_miss() {
