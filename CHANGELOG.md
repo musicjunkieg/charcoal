@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- #424 — `charcoal estimate <handle>...` measures what a full scan would cost
+  without paying for it. It runs the production scan body against a
+  throwaway database with a stand-in Stage-2 classifier that pauses the burst
+  on its first batch, exactly as a cost cap does, then counts the posts left
+  pending: the queue a real scan would send to the GPU. A dollar range comes
+  from RunPod's own bills for three past scans. Built to model per-account
+  cost before alpha invites.
 - #393 — every full scan and nightly refresh records its estimated GPU cost
   in a new `scan_costs` table (schema v20), success or failure, and logs a
   one-line summary. The admin page shows per-user full-scan, refresh and

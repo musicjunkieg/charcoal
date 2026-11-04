@@ -132,6 +132,22 @@ Options:
 This is slower than `scan` (potentially thousands of API calls) and is
 designed for periodic use rather than continuous monitoring.
 
+### Estimate a full scan's cost for free (optional)
+
+```bash
+cargo run --release --features web -- estimate someone.bsky.social other.example.com
+```
+
+Runs the real web full scan for each account (discovery, gather, the local
+ONNX clean pass) and stops at the GPU step. It reports how many posts the scan
+would send to the Stage-2 classifier, plus a billed-cost range calibrated
+against RunPod's actual bills (`src/observability/scan_estimate.rs`). Nothing
+is sent to RunPod and no RunPod settings are needed. Each account runs in its
+own throwaway SQLite database, deleted afterwards, so only the printed counts
+remain. The count is a brand-new user's first scan; a live scan can send fewer,
+because verdicts cached from other users' scans are free. Expect a few minutes
+per account.
+
 ### 8. View results
 
 **Score a single account:**

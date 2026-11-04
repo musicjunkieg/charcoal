@@ -1433,6 +1433,68 @@ pub(crate) fn full_scan_cost_outcome(
     }
 }
 
+/// What a free scan estimate measured for one account (#424).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FullScanEstimate {
+    /// Posts the scan would send to the GPU for classification: exactly the
+    /// queue a real full scan builds, before its verdict cache is consulted.
+    pub posts_to_classify: i64,
+    /// Amplification events (quotes, reposts, likes, drive-by replies) found.
+    pub events: usize,
+    /// Accounts the gather settled without the GPU (clean and off-topic, or
+    /// too few posts to judge).
+    pub accounts_scored_without_gpu: usize,
+}
+
+/// Run a full scan of `handle` up to the classification burst and report what
+/// it would have sent to the GPU, without sending anything (#424).
+///
+/// This is the production scan body, unchanged: same discovery, same gather,
+/// same ONNX clean pass. Only the Stage-2 backend differs. It is
+/// [`EstimateOnlyClassifier`](crate::toxicity::estimate_only::EstimateOnlyClassifier),
+/// which pauses the burst on its first batch the way a real cost cap does,
+/// leaving every queued post pending to be counted.
+///
+/// `db` should be a throwaway database. Run against a blank one, the count is
+/// what a brand-new user's first scan sends; a database holding cached verdicts
+/// would not change the count (the cache is consulted only in the burst) but
+/// this writes the account's scan data into it.
+pub async fn estimate_full_scan(
+    config: Arc<Config>,
+    db: Arc<dyn Database>,
+    models: Arc<ScanModels>,
+    user_did: &str,
+    handle: &str,
+) -> anyhow::Result<FullScanEstimate> {
+    db.upsert_user(user_did, handle).await?;
+    let scorers = crate::web::scan_setup::build_scan_scorers_with(
+        &models,
+        &db,
+        Arc::new(crate::toxicity::estimate_only::EstimateOnlyClassifier),
+        // Ceiling 0 = disabled: nothing here bills, so there is nothing to cap.
+        Arc::new(crate::toxicity::cost_meter::ScanCostMeter::new(0, 0)),
+    );
+    let run = run_scan_body(
+        config,
+        Arc::clone(&db),
+        models,
+        Arc::new(RwLock::new(ScanManager::new())),
+        user_did,
+        handle,
+        "estimate",
+        &scorers,
+    )
+    .await?;
+    // A scan with nothing to classify drains to `done` instead of pausing;
+    // either way, what is still pending is what the GPU would have been sent.
+    let posts_to_classify = db.count_pending_classifications(user_did).await?;
+    Ok(FullScanEstimate {
+        posts_to_classify,
+        events: run.events,
+        accounts_scored_without_gpu: run.scored,
+    })
+}
+
 // #393: one call site; `scorers` is the only seam the cost wrapper adds.
 #[allow(clippy::too_many_arguments)]
 async fn run_scan_body(
