@@ -1550,10 +1550,18 @@ async fn estimate_one(
         .await
     }
     .await;
-    // The database (and its WAL/SHM files) closed when the scan returned;
-    // remove the directory now rather than at the end of the whole run.
-    dir.close()?;
-    Ok((followers, result?))
+    // A failed scan returns its own error; dropping `dir` then removes the
+    // directory best-effort. A cleanup failure must not discard a good
+    // estimate, but it leaves scanned data on disk, so say where, loudly.
+    let estimate = result?;
+    let path = dir.path().to_path_buf();
+    if let Err(e) = dir.close() {
+        eprintln!(
+            "warning: could not remove {} ({e}); it holds {handle}'s scan data — delete it by hand",
+            path.display()
+        );
+    }
+    Ok((followers, estimate))
 }
 
 /// Initialize the database (create if needed).
