@@ -50,6 +50,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Also, once the burst decides to stop (cost cap, a failed request, or a
   refused probe), it no longer sends the rest of the batch to the GPU only to
   throw the answers away; chunks not yet started are skipped and stay pending.
+- #425 — when the identity check fails, the batches already waiting on it
+  share that one failure instead of each asking the endpoint again. Before,
+  each waiting batch re-ran the check in turn, and on a cold worker each
+  retry could wait out the long warm-up timeout (up to 16 at the default
+  concurrency, 2 on prod's). The shared failure keeps its kind, so a
+  cold-start timeout still pauses the scan for a later resume instead of
+  failing it. A later, separate request still re-checks; only a success is
+  remembered for the whole run (PR #160 review).
 - #344 — `charcoal migrate` copies every score row verbatim
   (`export_scores` / `import_score`), including expired, legacy and
   NotAssessed rows, with their original `scored_at`, revision stamp and

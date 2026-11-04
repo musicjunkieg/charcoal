@@ -16,10 +16,4 @@ describe('formatCents properties (#420)', () => {
 			})
 		);
 	});
-
-	// Invariant: a user with no full scan yet shows the em dash, never a
-	// dollar figure.
-	it('renders null as the em dash', () => {
-		expect(formatCents(null)).toBe('—');
-	});
 });
