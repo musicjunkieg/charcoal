@@ -278,8 +278,11 @@ blank means `policy-unknown`.
 **What happens if it does not match.** A stored verdict records the policy that
 actually produced it, and a score may only be published from verdicts this
 binary recognises. So a mismatched value means every Stage-2 verdict is foreign
-evidence: every account is re-gathered once and then skipped, and no scores are
-written. To make that cheap to find rather than expensive to discover:
+evidence: every account is re-gathered once and then skipped, and no
+classifier-based score is written. (Accounts the gather settles on its own,
+from the local ONNX clean pass or too few posts, are still scored: those
+scores never consult the Stage-2 policy.) To make that cheap to find rather
+than expensive to discover:
 
 - **the web scan paths probe the endpoint before they classify anything** and
   fail the scan, naming both values and this variable. That is a scan
@@ -288,8 +291,9 @@ written. To make that cheap to find rather than expensive to discover:
   with the endpoint: it happens on the first post that is not already in the
   verdict cache, right before that post would be classified (#394, #423). A
   dashboard scan therefore still gathers first and only then refuses; that
-  costs Bluesky fetching time but no GPU work, and saves a second cold boot
-  on every correctly configured scan;
+  costs Bluesky fetching time and the probe's own round trip, which can wake
+  a billed GPU worker, but no user post is sent for Stage-2 classification.
+  In exchange, every correctly configured scan saves a second cold boot;
 - **the CLI does not probe.** `charcoal scan` and `charcoal sweep`
   (`src/main.rs`) call the pipelines directly, with no probe in front of them.
   On those two commands a wrong value still costs what the probe exists to

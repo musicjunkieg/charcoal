@@ -17,27 +17,78 @@
 //! cached, never contacts it at all.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use async_trait::async_trait;
-use tokio::sync::OnceCell;
+use tokio::sync::Mutex;
 
 use crate::db::{ClassifierVerdictRow, Database};
 use crate::observability::cache_stats::CacheStats;
 
 use super::cached::text_sha256;
-use super::classifier::{ClassifierVerdict, ItemOutcome, ToxicityClassifier};
+use super::classifier::{
+    ClassifierTransientError, ClassifierVerdict, ItemOutcome, ToxicityClassifier,
+};
+use super::cost_meter::CostCeilingExceeded;
+
+/// A failed probe, kept so callers that were queued behind it can share it.
+///
+/// `anyhow::Error` is not `Clone`, so the failure is stored as the parts the
+/// burst cares about and rebuilt per caller. The kind must survive: the burst
+/// pauses on a transient failure or a cost cap and fails the scan on anything
+/// else, so replaying a cold-worker timeout as a plain error would turn a
+/// resumable pause into a failed scan.
+#[derive(Clone)]
+enum ProbeFailure {
+    Transient(String),
+    CostCapped { est_cents: u32, ceiling_cents: u32 },
+    Other(String),
+}
+
+impl ProbeFailure {
+    fn capture(err: &anyhow::Error) -> Self {
+        if let Some(t) = err.downcast_ref::<ClassifierTransientError>() {
+            ProbeFailure::Transient(t.0.clone())
+        } else if let Some(c) = err.downcast_ref::<CostCeilingExceeded>() {
+            ProbeFailure::CostCapped {
+                est_cents: c.est_cents,
+                ceiling_cents: c.ceiling_cents,
+            }
+        } else {
+            ProbeFailure::Other(format!("{err:#}"))
+        }
+    }
+
+    fn replay(&self) -> anyhow::Error {
+        match self {
+            ProbeFailure::Transient(detail) => ClassifierTransientError::new(detail.clone()).into(),
+            ProbeFailure::CostCapped {
+                est_cents,
+                ceiling_cents,
+            } => CostCeilingExceeded {
+                est_cents: *est_cents,
+                ceiling_cents: *ceiling_cents,
+            }
+            .into(),
+            ProbeFailure::Other(detail) => anyhow::anyhow!("{detail}"),
+        }
+    }
+}
 
 pub struct CachedClassifier {
     inner: Arc<dyn ToxicityClassifier>,
     db: Arc<dyn Database>,
     stats: Arc<CacheStats>,
-    /// Set once the endpoint has confirmed its identity for this run. Only a
-    /// SUCCESS is remembered: `get_or_try_init` leaves the cell empty on an
-    /// error, so a refused or failed probe is asked again next time rather
-    /// than replayed.
-    probed: OnceCell<()>,
+    /// Set once the endpoint has confirmed its identity for this run.
+    probed: AtomicBool,
+    /// How many probes have failed. A caller reads it BEFORE queueing for
+    /// `probe_lock`; if it moved while the caller waited, the caller was
+    /// queued behind that failure and shares it instead of asking again.
+    failures: AtomicU64,
+    /// Serialises probes and holds the most recent failure for replay.
+    probe_lock: Mutex<Option<ProbeFailure>>,
 }
 
 impl CachedClassifier {
@@ -50,17 +101,46 @@ impl CachedClassifier {
             inner,
             db,
             stats,
-            probed: OnceCell::new(),
+            probed: AtomicBool::new(false),
+            failures: AtomicU64::new(0),
+            probe_lock: Mutex::new(None),
         }
     }
 
     /// Probe the endpoint unless this run already has. Concurrent burst
-    /// batches share one in-flight probe instead of each paying their own.
+    /// batches share one in-flight probe instead of each paying their own,
+    /// whether it succeeds or fails.
+    ///
+    /// Only a success is remembered for good. A failure is shared with the
+    /// callers that were already waiting on it (PR #160 review: they used to
+    /// re-probe one after another, each able to wait out the cold-start
+    /// timeout), but a caller that arrives afterwards asks again, so a
+    /// transient failure does not condemn the rest of the run (#394).
     async fn ensure_probed(&self) -> Result<()> {
-        self.probed
-            .get_or_try_init(|| self.inner.probe_identity())
-            .await?;
-        Ok(())
+        if self.probed.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let failures_seen = self.failures.load(Ordering::SeqCst);
+        let mut last_failure = self.probe_lock.lock().await;
+        if self.probed.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        if self.failures.load(Ordering::SeqCst) != failures_seen {
+            if let Some(failure) = last_failure.as_ref() {
+                return Err(failure.replay());
+            }
+        }
+        match self.inner.probe_identity().await {
+            Ok(()) => {
+                self.probed.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+            Err(err) => {
+                *last_failure = Some(ProbeFailure::capture(&err));
+                self.failures.fetch_add(1, Ordering::SeqCst);
+                Err(err)
+            }
+        }
     }
 
     /// A cached row rebuilt as a verdict. `latency_ms` is 0: nothing was

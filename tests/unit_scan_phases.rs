@@ -3029,6 +3029,10 @@ mod burst_tests {
         }
         async fn probe_identity(&self) -> Result<()> {
             self.probes.fetch_add(1, Ordering::SeqCst);
+            // A real probe is a network round trip. Without one the first
+            // chunk's probe fails before any other chunk reaches it, and the
+            // test could not see chunks queueing behind a failing probe.
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             anyhow::bail!("endpoint serves policy other-policy, deployment declares stub")
         }
         fn name(&self) -> &'static str {
@@ -3068,7 +3072,7 @@ mod burst_tests {
 
         // Requirement: the refusal fails the scan (an Err, not a resumable
         // pause that would retry the same wrong endpoint forever).
-        let err = run_burst(&db, BURST_USER, &classifier, 2, 100)
+        let err = run_burst(&db, BURST_USER, &classifier, 4, 100)
             .await
             .expect_err("a refused probe must abort the burst");
         assert!(
@@ -3077,14 +3081,15 @@ mod burst_tests {
         );
         // Requirement: nothing was sent for classification.
         assert_eq!(inner.classified.load(Ordering::SeqCst), 0);
-        // Requirement: the refusal is not re-asked once per chunk. A failed
-        // probe is not memoised, so only the chunks already in flight when
-        // it failed (at most the concurrency, 2) may probe; the other four
-        // chunks must never start.
+        // Requirement: the refusal is asked exactly once. The chunks already
+        // in flight when it failed (up to the concurrency, 4) were waiting on
+        // that same probe and must share its answer rather than each asking
+        // again, which on a cold worker waits out the long warm-up timeout
+        // per chunk (PR #160 review). The other chunks must never start.
         let probes = inner.probes.load(Ordering::SeqCst);
-        assert!(
-            (1..=2).contains(&probes),
-            "probed {probes} times for 6 chunks at concurrency 2"
+        assert_eq!(
+            probes, 1,
+            "probed {probes} times for 6 chunks at concurrency 4"
         );
         // Requirement: no row was recorded, so nothing foreign or sentinel
         // can be scored and a fixed endpoint can redo all six.

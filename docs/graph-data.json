@@ -13507,6 +13507,105 @@
       "created_at": "2026-11-02T23:08:02.476659-08:00",
       "updated_at": "2026-11-02T23:08:05.311200-08:00",
       "metadata_json": "{\"branch\":\"perf/423-probe-before-burst\",\"commit\":\"02e21a3\",\"confidence\":85}"
+    },
+    {
+      "id": 1238,
+      "change_id": "aace75bf-1e06-4e7d-8991-82a3912c897e",
+      "node_type": "action",
+      "title": "Burst stops sending chunks after first stop (CodeRabbit PR #159)",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-11-02T23:57:40.317733-08:00",
+      "updated_at": "2026-11-02T23:57:40.335892-08:00",
+      "metadata_json": "{\"branch\":\"perf/423-probe-before-burst\",\"commit\":\"c056a1a\",\"confidence\":85,\"files\":[\"src/pipeline/scan_phases/burst.rs\",\"tests/unit_scan_phases.rs\"]}"
+    },
+    {
+      "id": 1239,
+      "change_id": "311ead96-cd3f-4baa-bc48-86ea0008440d",
+      "node_type": "outcome",
+      "title": "PR #159 merged to staging (aa7f670)",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-11-03T00:14:33.417419-08:00",
+      "updated_at": "2026-11-03T00:14:33.434278-08:00",
+      "metadata_json": "{\"branch\":\"perf/423-probe-before-burst\",\"commit\":\"c056a1a\",\"confidence\":90}"
+    },
+    {
+      "id": 1240,
+      "change_id": "adfbf476-d95f-4324-aa89-0967706d5195",
+      "node_type": "outcome",
+      "title": "#423 live: staging scan billed $0.357 vs $0.74 before; one cold boot",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-03T09:17:06.603009-08:00",
+      "updated_at": "2026-11-03T09:17:06.603009-08:00",
+      "metadata_json": "{\"branch\":\"perf/423-probe-before-burst\",\"commit\":\"c056a1a\",\"confidence\":95}"
+    },
+    {
+      "id": 1241,
+      "change_id": "8360fc5f-2db2-43db-8d81-b61cf8931c24",
+      "node_type": "goal",
+      "title": "Free gather-only scan estimate for cost modeling (#424)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-03T17:03:12.507185-08:00",
+      "updated_at": "2026-11-03T17:03:12.507185-08:00",
+      "metadata_json": "{\"branch\":\"perf/423-probe-before-burst\",\"confidence\":90,\"prompt\":\"1) move to live site\\n2) build the free test, and it can measure accounts I give you\"}"
+    },
+    {
+      "id": 1242,
+      "change_id": "cba5498f-0788-492b-b9e0-2468f1abf098",
+      "node_type": "action",
+      "title": "Add EstimateOnlyClassifier stand-in + estimate command (#424)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-03T17:05:22.396791-08:00",
+      "updated_at": "2026-11-03T17:05:22.396791-08:00",
+      "metadata_json": "{\"branch\":\"feat/424-scan-estimate\",\"commit\":\"aa7f670\",\"confidence\":85,\"files\":[\"src/toxicity/estimate_only.rs\"]}"
+    },
+    {
+      "id": 1243,
+      "change_id": "50745788-a628-44a6-8c06-4309b8599a50",
+      "node_type": "option",
+      "title": "Run the real full-scan pipeline locally with a stand-in classifier that cost-caps on first batch",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-03T17:05:28.311586-08:00",
+      "updated_at": "2026-11-03T17:05:28.311586-08:00",
+      "metadata_json": "{\"branch\":\"feat/424-scan-estimate\",\"confidence\":85}"
+    },
+    {
+      "id": 1244,
+      "change_id": "521d92f0-a806-4915-9aee-75a5f7bd2931",
+      "node_type": "option",
+      "title": "Refactor run_scan_body/run_phased_scan with a stop-after-gather flag",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-03T17:05:28.326887-08:00",
+      "updated_at": "2026-11-03T17:05:28.326887-08:00",
+      "metadata_json": "{\"branch\":\"feat/424-scan-estimate\",\"confidence\":60}"
+    },
+    {
+      "id": 1245,
+      "change_id": "9c1b46a9-7b1d-4c30-96f3-c178ccdd2e2b",
+      "node_type": "decision",
+      "title": "Stand-in classifier: zero prod code-path changes, count is exactly what prod would send",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-03T17:05:28.341489-08:00",
+      "updated_at": "2026-11-03T17:05:28.341489-08:00",
+      "metadata_json": "{\"branch\":\"feat/424-scan-estimate\",\"confidence\":85}"
+    },
+    {
+      "id": 1246,
+      "change_id": "dc40621f-a38d-4532-b129-89eb63a5bcc7",
+      "node_type": "action",
+      "title": "PR #160 review fixes: share failed probe with waiters, README, stryker mutate, dup test (#425)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-03T17:19:24.202066-08:00",
+      "updated_at": "2026-11-03T17:19:24.202066-08:00",
+      "metadata_json": "{\"branch\":\"fix/160-review\",\"commit\":\"aa7f670\",\"confidence\":85,\"files\":[\"src/toxicity/cached_classifier.rs\",\"README.md\",\"web/stryker.config.json\"]}"
     }
   ],
   "edges": [
@@ -27578,6 +27677,105 @@
       "weight": 1.0,
       "rationale": "Implementation result",
       "created_at": "2026-11-02T23:08:05.297199-08:00"
+    },
+    {
+      "id": 1290,
+      "from_node_id": 1237,
+      "to_node_id": 1238,
+      "from_change_id": "8d346b9e-2ed7-43cd-a2eb-4da919aae270",
+      "to_change_id": "aace75bf-1e06-4e7d-8991-82a3912c897e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review follow-up",
+      "created_at": "2026-11-02T23:57:40.327744-08:00"
+    },
+    {
+      "id": 1291,
+      "from_node_id": 1237,
+      "to_node_id": 1239,
+      "from_change_id": "8d346b9e-2ed7-43cd-a2eb-4da919aae270",
+      "to_change_id": "311ead96-cd3f-4baa-bc48-86ea0008440d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Merged",
+      "created_at": "2026-11-03T00:14:33.425367-08:00"
+    },
+    {
+      "id": 1292,
+      "from_node_id": 1236,
+      "to_node_id": 1240,
+      "from_change_id": "107a2f5e-10b3-47ae-87e8-f52881ac2e55",
+      "to_change_id": "adfbf476-d95f-4324-aa89-0967706d5195",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Live billing verification",
+      "created_at": "2026-11-03T09:17:06.611259-08:00"
+    },
+    {
+      "id": 1293,
+      "from_node_id": 1241,
+      "to_node_id": 1243,
+      "from_change_id": "8360fc5f-2db2-43db-8d81-b61cf8931c24",
+      "to_change_id": "50745788-a628-44a6-8c06-4309b8599a50",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-11-03T17:05:28.352623-08:00"
+    },
+    {
+      "id": 1294,
+      "from_node_id": 1241,
+      "to_node_id": 1244,
+      "from_change_id": "8360fc5f-2db2-43db-8d81-b61cf8931c24",
+      "to_change_id": "521d92f0-a806-4915-9aee-75a5f7bd2931",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-11-03T17:05:28.361889-08:00"
+    },
+    {
+      "id": 1295,
+      "from_node_id": 1243,
+      "to_node_id": 1245,
+      "from_change_id": "50745788-a628-44a6-8c06-4309b8599a50",
+      "to_change_id": "9c1b46a9-7b1d-4c30-96f3-c178ccdd2e2b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen",
+      "created_at": "2026-11-03T17:05:28.369770-08:00"
+    },
+    {
+      "id": 1296,
+      "from_node_id": 1244,
+      "to_node_id": 1245,
+      "from_change_id": "521d92f0-a806-4915-9aee-75a5f7bd2931",
+      "to_change_id": "9c1b46a9-7b1d-4c30-96f3-c178ccdd2e2b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected",
+      "created_at": "2026-11-03T17:05:28.381297-08:00"
+    },
+    {
+      "id": 1297,
+      "from_node_id": 1245,
+      "to_node_id": 1242,
+      "from_change_id": "9c1b46a9-7b1d-4c30-96f3-c178ccdd2e2b",
+      "to_change_id": "cba5498f-0788-492b-b9e0-2468f1abf098",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implements",
+      "created_at": "2026-11-03T17:05:28.398242-08:00"
+    },
+    {
+      "id": 1298,
+      "from_node_id": 1236,
+      "to_node_id": 1246,
+      "from_change_id": "107a2f5e-10b3-47ae-87e8-f52881ac2e55",
+      "to_change_id": "dc40621f-a38d-4532-b129-89eb63a5bcc7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review follow-up on the #423 promotion",
+      "created_at": "2026-11-03T17:19:24.216471-08:00"
     }
   ],
   "documents": [

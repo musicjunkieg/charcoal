@@ -1,6 +1,10 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "vitest",
+  "mutate": [
+    "src/lib/**/*.ts",
+    "!src/lib/**/*.test.ts"
+  ],
   "vitest": {
     "configFile": "vitest.config.ts"
   },
