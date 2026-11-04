@@ -3094,6 +3094,41 @@ mod burst_tests {
         );
     }
 
+    // ── Test: the free estimate's stand-in stops the burst untouched (#424) ──
+    //
+    // `charcoal estimate` reads the scan's queued-post count after the burst
+    // stops. That number is only the cost of a real scan if the stand-in, run
+    // through the production wrapper, leaves the queue exactly as gather left
+    // it: no verdict, no benign sentinel, and a resumable pause, not an error.
+    #[tokio::test]
+    async fn the_estimate_stand_in_pauses_the_burst_with_every_row_pending() {
+        use charcoal::observability::cache_stats::CacheStats;
+        use charcoal::toxicity::cached_classifier::CachedClassifier;
+        use charcoal::toxicity::estimate_only::EstimateOnlyClassifier;
+
+        let db = open_burst_db().await;
+        let acct = "did:plc:burst012";
+        let rows: Vec<QueueRow> = (0..6).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(CachedClassifier::new(
+            Arc::new(EstimateOnlyClassifier) as Arc<dyn ToxicityClassifier>,
+            Arc::clone(&db),
+            Arc::new(CacheStats::default()),
+        ));
+
+        // Requirement: a pause the estimate can read, not a failed scan.
+        let outcome = run_burst(&db, BURST_USER, &classifier, 2, 100)
+            .await
+            .expect("the stand-in must pause the burst, not fail it");
+        assert_eq!(outcome, BurstOutcome::CostCapped);
+        // Requirement: every queued post is still counted as pending.
+        assert_eq!(
+            db.count_pending_classifications(BURST_USER).await.unwrap(),
+            6
+        );
+    }
+
     /// Answers every request with one outcome too many, breaking the
     /// positional contract, and counts the requests it was sent.
     struct WrongLengthClassifier {
