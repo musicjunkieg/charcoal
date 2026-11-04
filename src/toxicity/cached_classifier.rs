@@ -11,9 +11,10 @@
 //! real round trip to the GPU endpoint, and on RunPod serverless every round
 //! trip bills a worker's idle tail. Paying it up front, before anything was
 //! gathered, meant a refresh whose candidates were all deleted accounts woke
-//! the GPU every hour to classify nothing. Here it is paid at most once per
-//! instance — one instance per run — and only when a cache MISS is about to
-//! reach the endpoint. A run that classifies nothing, or finds every verdict
+//! the GPU every hour to classify nothing. Here it is paid only when a cache
+//! MISS is about to reach the endpoint, and a SUCCESS is paid at most once per
+//! instance (one instance per run). A failure is shared with the batches
+//! already waiting on it, and asked again by any later one. A run that classifies nothing, or finds every verdict
 //! cached, never contacts it at all.
 
 use std::collections::HashMap;
@@ -120,6 +121,10 @@ impl CachedClassifier {
         if self.probed.load(Ordering::SeqCst) {
             return Ok(());
         }
+        // Read before queueing. A probe that fails in the short gap between
+        // this read and the lock is also shared with this caller even though
+        // it did not wait on it; that only ever saves a probe, never skips a
+        // needed one, because a success is checked first.
         let failures_seen = self.failures.load(Ordering::SeqCst);
         let mut last_failure = self.probe_lock.lock().await;
         if self.probed.load(Ordering::SeqCst) {
@@ -257,7 +262,7 @@ impl ToxicityClassifier for CachedClassifier {
     }
     /// Contacts the live endpoint — never answered from the verdict cache,
     /// whose rows are exactly the stale identity the probe checks for — but
-    /// at most once per run: an explicit probe IS the run's probe, so the
+    /// a success at most once per run: an explicit probe IS the run's probe, so the
     /// first miss afterwards does not pay another. (Scans no longer call this
     /// up front — #423 — and rely on the first-miss probe instead.)
     async fn probe_identity(&self) -> anyhow::Result<()> {
@@ -274,5 +279,43 @@ impl ToxicityClassifier for CachedClassifier {
     }
     fn threshold(&self) -> f32 {
         self.inner.threshold()
+    }
+}
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn kind(err: &anyhow::Error) -> (&'static str, String) {
+        if let Some(t) = err.downcast_ref::<ClassifierTransientError>() {
+            ("transient", t.0.clone())
+        } else if let Some(c) = err.downcast_ref::<CostCeilingExceeded>() {
+            ("cost", format!("{}/{}", c.est_cents, c.ceiling_cents))
+        } else {
+            ("other", format!("{err:#}"))
+        }
+    }
+
+    proptest! {
+        // Invariant: replaying a captured probe failure yields an error of the
+        // SAME kind with the same detail. The burst pauses on a transient
+        // error or a cost cap and fails the scan on any other, so a replay
+        // that changed the kind would change what a waiting batch's scan does.
+        #[test]
+        fn a_replayed_failure_keeps_its_kind_and_detail(
+            which in 0u8..3,
+            detail in "[a-z ]{0,30}",
+            est in any::<u32>(),
+            ceiling in any::<u32>(),
+        ) {
+            let original: anyhow::Error = match which {
+                0 => ClassifierTransientError::new(detail.clone()).into(),
+                1 => CostCeilingExceeded { est_cents: est, ceiling_cents: ceiling }.into(),
+                _ => anyhow::anyhow!("{detail}"),
+            };
+            let replayed = ProbeFailure::capture(&original).replay();
+            prop_assert_eq!(kind(&replayed), kind(&original));
+        }
     }
 }

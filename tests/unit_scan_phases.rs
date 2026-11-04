@@ -3032,7 +3032,7 @@ mod burst_tests {
             // A real probe is a network round trip. Without one the first
             // chunk's probe fails before any other chunk reaches it, and the
             // test could not see chunks queueing behind a failing probe.
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             anyhow::bail!("endpoint serves policy other-policy, deployment declares stub")
         }
         fn name(&self) -> &'static str {

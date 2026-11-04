@@ -40,7 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Also, once the burst decides to stop (cost cap, a failed request, or a
   refused probe), it no longer sends the rest of the batch to the GPU only to
   throw the answers away; chunks not yet started are skipped and stay pending.
-- #425 — when the identity check fails, the burst's other in-flight batches
+- #425 — when the identity check fails, the batches already waiting on it
   share that one failure instead of each asking the endpoint again. Before,
   each waiting batch re-ran the check in turn, and on a cold worker each
   retry could wait out the long warm-up timeout (up to 16 at the default

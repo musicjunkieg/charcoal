@@ -484,7 +484,7 @@ impl ToxicityClassifier for SlowTransientProbe {
     }
     async fn probe_identity(&self) -> anyhow::Result<()> {
         self.probes.fetch_add(1, Ordering::SeqCst);
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         Err(
             charcoal::toxicity::classifier::ClassifierTransientError::new("warm-up timed out")
                 .into(),
