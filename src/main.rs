@@ -160,6 +160,17 @@ enum Commands {
         bind: String,
     },
 
+    /// Estimate what a full scan would cost, for free (#424). Runs the real
+    /// scan for each account up to the GPU step, counts the posts it would
+    /// send, and stops. Nothing is sent to RunPod; each account gets its own
+    /// throwaway database, deleted afterwards, so only the counts remain.
+    #[cfg(feature = "web")]
+    Estimate {
+        /// Bluesky handles to measure (e.g. someone.bsky.social)
+        #[arg(required = true)]
+        handles: Vec<String>,
+    },
+
     /// Run Zentropi CoPE diagnostic suite — verifies the API key + labeler are
     /// configured correctly. Useful as a smoke test before relying on Zentropi
     /// in production scoring.
@@ -986,6 +997,11 @@ async fn main() -> Result<()> {
             charcoal::web::run_server(config, db, port, &bind).await?;
         }
 
+        #[cfg(feature = "web")]
+        Commands::Estimate { handles } => {
+            run_estimates(&handles).await?;
+        }
+
         Commands::ZentropiCheck => {
             let config = config::Config::load()?;
 
@@ -1422,6 +1438,130 @@ async fn open_database(config: &config::Config) -> Result<Arc<dyn charcoal::db::
         }
     }
     charcoal::db::open_sqlite(&config.db_path)
+}
+
+/// `charcoal estimate`: measure each account with the real scan, stopped
+/// before the GPU (#424). One row per account; a failed account prints its
+/// error and the rest still run.
+#[cfg(feature = "web")]
+async fn run_estimates(handles: &[String]) -> Result<()> {
+    use charcoal::observability::scan_estimate::estimated_cost_cents;
+
+    let config = Arc::new(config::Config::load()?);
+    // The audit logs write post text and handles to disk when switched on.
+    // An estimate keeps nothing but its counts, so force them off for this
+    // process whatever `.env` says. Single-threaded here: no scan has started.
+    for kind in [
+        charcoal::scoring::audit_log::EventKind::Classifier,
+        charcoal::scoring::audit_log::EventKind::Nli,
+    ] {
+        std::env::remove_var(kind.env_var());
+    }
+    // One burst chunk at a time, so the stand-in's refusal is the burst's only
+    // call and `direct_requests` can set exactly that call aside. The queue,
+    // and so the count, does not depend on concurrency.
+    std::env::set_var("CHARCOAL_BURST_CONCURRENCY", "1");
+    if !charcoal::toxicity::download::model_files_present(&config.model_dir)
+        || !charcoal::toxicity::download::embedding_files_present(&config.model_dir)
+        || !charcoal::toxicity::download::nli_files_present(&config.model_dir)
+    {
+        anyhow::bail!(
+            "ONNX models missing from {} — run `charcoal download-model` first \
+             (or set CHARCOAL_MODEL_DIR=./models)",
+            config.model_dir.display()
+        );
+    }
+    let models = Arc::new(charcoal::web::scan_setup::ScanModels::load(
+        &config.model_dir,
+    )?);
+    let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
+
+    println!(
+        "{:<32} {:>9} {:>8} {:>12} {:>8} {:>15}",
+        "account", "followers", "events", "queued posts", "direct", "est. billed"
+    );
+    for (i, handle) in handles.iter().enumerate() {
+        let handle = handle.trim_start_matches('@');
+        let row = estimate_one(&config, &models, &client, handle, i).await;
+        match row {
+            Ok((followers, est)) => {
+                let posts = u64::try_from(est.posts_to_classify).unwrap_or(0) + est.direct_requests;
+                let (low, high) = estimated_cost_cents(posts);
+                println!(
+                    "{:<32} {:>9} {:>8} {:>12} {:>8} {:>15}",
+                    handle,
+                    followers.map_or_else(|| "?".to_string(), |f| f.to_string()),
+                    est.events,
+                    est.posts_to_classify,
+                    est.direct_requests,
+                    format!(
+                        "${}.{:02}-${}.{:02}",
+                        low / 100,
+                        low % 100,
+                        high / 100,
+                        high % 100
+                    ),
+                );
+            }
+            Err(e) => println!("{handle:<32} failed: {e:#}"),
+        }
+    }
+    println!(
+        "\nqueued posts + direct (quotes and replies scored one at a time) = what a \
+         brand-new user's first full scan sends to the GPU. A live scan can send fewer: \
+         verdicts cached from other users' scans are free, and identical texts in one \
+         batch are sent once."
+    );
+    Ok(())
+}
+
+/// One account's estimate, in its own throwaway SQLite database. The file is
+/// removed whether the scan succeeds or fails, so no scanned data stays on disk.
+#[cfg(feature = "web")]
+async fn estimate_one(
+    config: &Arc<config::Config>,
+    models: &Arc<charcoal::web::scan_setup::ScanModels>,
+    client: &charcoal::bluesky::client::PublicAtpClient,
+    handle: &str,
+    index: usize,
+) -> Result<(Option<u64>, charcoal::web::scan_job::FullScanEstimate)> {
+    let did = client.resolve_handle(handle).await?;
+    let followers = client
+        .xrpc_get::<serde_json::Value>("app.bsky.actor.getProfile", &[("actor", did.as_str())])
+        .await
+        .ok()
+        .and_then(|p| p.get("followersCount").and_then(|v| v.as_u64()));
+
+    // A private (0700), randomly named directory, removed when `dir` drops:
+    // on success, on error, and when a panic unwinds out of the scan.
+    let dir = tempfile::Builder::new()
+        .prefix(&format!("charcoal-estimate-{index}-"))
+        .tempdir()?;
+    let db_path_str = dir.path().join("scan.db").to_string_lossy().to_string();
+    let result = async {
+        let db = charcoal::db::initialize_sqlite(&db_path_str)?;
+        charcoal::web::scan_job::estimate_full_scan(
+            Arc::clone(config),
+            db,
+            Arc::clone(models),
+            &did,
+            handle,
+        )
+        .await
+    }
+    .await;
+    // A failed scan returns its own error; dropping `dir` then removes the
+    // directory best-effort. A cleanup failure must not discard a good
+    // estimate, but it leaves scanned data on disk, so say where, loudly.
+    let estimate = result?;
+    let path = dir.path().to_path_buf();
+    if let Err(e) = dir.close() {
+        eprintln!(
+            "warning: could not remove {} ({e}); it holds {handle}'s scan data — delete it by hand",
+            path.display()
+        );
+    }
+    Ok((followers, estimate))
 }
 
 /// Initialize the database (create if needed).
