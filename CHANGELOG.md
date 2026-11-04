@@ -11,9 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   without paying for it. It runs the production scan body against a
   throwaway database with a stand-in Stage-2 classifier that pauses the burst
   on its first batch, exactly as a cost cap does, then counts the posts left
-  pending: the queue a real scan would send to the GPU. A dollar range comes
-  from RunPod's own bills for three past scans. Built to model per-account
-  cost before alpha invites.
+  pending (the queue a real scan would send to the GPU) plus the quotes and
+  replies the stand-in was asked to score one at a time during discovery. A
+  dollar range comes from RunPod's own bills for three past scans. Each
+  account's database lives in a private temp directory removed even on
+  failure, and the audit logs are forced off, so only the counts remain.
+  Built to model per-account cost before alpha invites.
 - #393 — every full scan and nightly refresh records its estimated GPU cost
   in a new `scan_costs` table (schema v20), success or failure, and logs a
   one-line summary. The admin page shows per-user full-scan, refresh and

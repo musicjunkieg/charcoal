@@ -1,5 +1,13 @@
 [
   {
+    "hash": "fe599738273ac604db8af196646e2315860b6cad",
+    "short_hash": "fe59973",
+    "author": "Bryan Guffey",
+    "date": "2026-11-03T18:00:30-08:00",
+    "message": "feat(424): charcoal estimate measures a full scan for free\n\nRuns the production scan body per account against a throwaway SQLite\ndatabase with the estimate-only classifier, then counts the posts left\npending: exactly what a live scan would send to the GPU. A billed-cost\nrange comes from estimated_cost_cents, calibrated on three RunPod bills.\nThe database file is removed after each account, success or failure.\n\nLive: chaosgreml.in -> 219 events, 1,614 posts, $0.31-$0.50, 4.5 min\n(staging scan this morning: 1,811 posts, billed $0.357).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 7
+  },
+  {
     "hash": "aa7f670c9eb0b14dd2aae9ada327fe690a9d4f2d",
     "short_hash": "aa7f670",
     "author": "Bryan Guffey",

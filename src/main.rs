@@ -1448,6 +1448,19 @@ async fn run_estimates(handles: &[String]) -> Result<()> {
     use charcoal::observability::scan_estimate::estimated_cost_cents;
 
     let config = Arc::new(config::Config::load()?);
+    // The audit logs write post text and handles to disk when switched on.
+    // An estimate keeps nothing but its counts, so force them off for this
+    // process whatever `.env` says. Single-threaded here: no scan has started.
+    for kind in [
+        charcoal::scoring::audit_log::EventKind::Classifier,
+        charcoal::scoring::audit_log::EventKind::Nli,
+    ] {
+        std::env::remove_var(kind.env_var());
+    }
+    // One burst chunk at a time, so the stand-in's refusal is the burst's only
+    // call and `direct_requests` can set exactly that call aside. The queue,
+    // and so the count, does not depend on concurrency.
+    std::env::set_var("CHARCOAL_BURST_CONCURRENCY", "1");
     if !charcoal::toxicity::download::model_files_present(&config.model_dir)
         || !charcoal::toxicity::download::embedding_files_present(&config.model_dir)
         || !charcoal::toxicity::download::nli_files_present(&config.model_dir)
@@ -1464,22 +1477,23 @@ async fn run_estimates(handles: &[String]) -> Result<()> {
     let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
 
     println!(
-        "{:<32} {:>9} {:>8} {:>16} {:>15}",
-        "account", "followers", "events", "posts to GPU", "est. billed"
+        "{:<32} {:>9} {:>8} {:>12} {:>8} {:>15}",
+        "account", "followers", "events", "queued posts", "direct", "est. billed"
     );
     for (i, handle) in handles.iter().enumerate() {
         let handle = handle.trim_start_matches('@');
         let row = estimate_one(&config, &models, &client, handle, i).await;
         match row {
             Ok((followers, est)) => {
-                let posts = u64::try_from(est.posts_to_classify).unwrap_or(0);
+                let posts = u64::try_from(est.posts_to_classify).unwrap_or(0) + est.direct_requests;
                 let (low, high) = estimated_cost_cents(posts);
                 println!(
-                    "{:<32} {:>9} {:>8} {:>16} {:>15}",
+                    "{:<32} {:>9} {:>8} {:>12} {:>8} {:>15}",
                     handle,
                     followers.map_or_else(|| "?".to_string(), |f| f.to_string()),
                     est.events,
                     est.posts_to_classify,
+                    est.direct_requests,
                     format!(
                         "${}.{:02}-${}.{:02}",
                         low / 100,
@@ -1493,8 +1507,10 @@ async fn run_estimates(handles: &[String]) -> Result<()> {
         }
     }
     println!(
-        "\nposts to GPU = what a brand-new user's first full scan sends. A live scan \
-         can send fewer: verdicts already cached from other users' scans are free."
+        "\nqueued posts + direct (quotes and replies scored one at a time) = what a \
+         brand-new user's first full scan sends to the GPU. A live scan can send fewer: \
+         verdicts cached from other users' scans are free, and identical texts in one \
+         batch are sent once."
     );
     Ok(())
 }
@@ -1516,11 +1532,12 @@ async fn estimate_one(
         .ok()
         .and_then(|p| p.get("followersCount").and_then(|v| v.as_u64()));
 
-    let db_path = std::env::temp_dir().join(format!(
-        "charcoal-estimate-{}-{index}.db",
-        std::process::id()
-    ));
-    let db_path_str = db_path.to_string_lossy().to_string();
+    // A private (0700), randomly named directory, removed when `dir` drops:
+    // on success, on error, and when a panic unwinds out of the scan.
+    let dir = tempfile::Builder::new()
+        .prefix(&format!("charcoal-estimate-{index}-"))
+        .tempdir()?;
+    let db_path_str = dir.path().join("scan.db").to_string_lossy().to_string();
     let result = async {
         let db = charcoal::db::initialize_sqlite(&db_path_str)?;
         charcoal::web::scan_job::estimate_full_scan(
@@ -1533,9 +1550,9 @@ async fn estimate_one(
         .await
     }
     .await;
-    for suffix in ["", "-wal", "-shm"] {
-        let _ = std::fs::remove_file(format!("{db_path_str}{suffix}"));
-    }
+    // The database (and its WAL/SHM files) closed when the scan returned;
+    // remove the directory now rather than at the end of the whole run.
+    dir.close()?;
     Ok((followers, result?))
 }
 

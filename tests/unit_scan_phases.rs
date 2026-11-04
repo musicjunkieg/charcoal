@@ -3111,14 +3111,16 @@ mod burst_tests {
         let rows: Vec<QueueRow> = (0..6).map(|i| pending_row(acct, &i.to_string())).collect();
         db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
 
+        let stand_in = Arc::new(EstimateOnlyClassifier::new());
         let classifier: Arc<dyn ToxicityClassifier> = Arc::new(CachedClassifier::new(
-            Arc::new(EstimateOnlyClassifier) as Arc<dyn ToxicityClassifier>,
+            Arc::clone(&stand_in) as Arc<dyn ToxicityClassifier>,
             Arc::clone(&db),
             Arc::new(CacheStats::default()),
         ));
 
         // Requirement: a pause the estimate can read, not a failed scan.
-        let outcome = run_burst(&db, BURST_USER, &classifier, 2, 100)
+        // Concurrency 1, as `charcoal estimate` runs it.
+        let outcome = run_burst(&db, BURST_USER, &classifier, 1, 100)
             .await
             .expect("the stand-in must pause the burst, not fail it");
         assert_eq!(outcome, BurstOutcome::CostCapped);
@@ -3127,6 +3129,11 @@ mod burst_tests {
             db.count_pending_classifications(BURST_USER).await.unwrap(),
             6
         );
+        // Requirement: the burst's refusal is never also counted as a direct
+        // request. At concurrency 1 the refusal stops the burst before its
+        // second chunk starts, so exactly one call is refused and it is the
+        // one `direct_requests` sets aside.
+        assert_eq!(stand_in.direct_requests(6), 0);
     }
 
     /// Answers every request with one outcome too many, breaking the

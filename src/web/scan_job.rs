@@ -1436,9 +1436,12 @@ pub(crate) fn full_scan_cost_outcome(
 /// What a free scan estimate measured for one account (#424).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FullScanEstimate {
-    /// Posts the scan would send to the GPU for classification: exactly the
-    /// queue a real full scan builds, before its verdict cache is consulted.
+    /// Posts the scan's burst would send to the GPU: the queue a real full
+    /// scan builds, before its verdict cache is consulted.
     pub posts_to_classify: i64,
+    /// GPU requests made outside the queue: quotes and replies scored one at
+    /// a time during discovery. Billed in a live scan like any other.
+    pub direct_requests: u64,
     /// Amplification events (quotes, reposts, likes, drive-by replies) found.
     pub events: usize,
     /// Accounts the gather settled without the GPU (clean and off-topic, or
@@ -1455,10 +1458,9 @@ pub struct FullScanEstimate {
 /// which pauses the burst on its first batch the way a real cost cap does,
 /// leaving every queued post pending to be counted.
 ///
-/// `db` should be a throwaway database. Run against a blank one, the count is
-/// what a brand-new user's first scan sends; a database holding cached verdicts
-/// would not change the count (the cache is consulted only in the burst) but
-/// this writes the account's scan data into it.
+/// `db` should be a throwaway database: this writes the account's scan data
+/// into it. Run against a blank one, the counts are what a brand-new user's
+/// first scan sends.
 pub async fn estimate_full_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
@@ -1467,10 +1469,11 @@ pub async fn estimate_full_scan(
     handle: &str,
 ) -> anyhow::Result<FullScanEstimate> {
     db.upsert_user(user_did, handle).await?;
+    let stand_in = Arc::new(crate::toxicity::estimate_only::EstimateOnlyClassifier::new());
     let scorers = crate::web::scan_setup::build_scan_scorers_with(
         &models,
         &db,
-        Arc::new(crate::toxicity::estimate_only::EstimateOnlyClassifier),
+        Arc::clone(&stand_in) as Arc<dyn crate::toxicity::classifier::ToxicityClassifier>,
         // Ceiling 0 = disabled: nothing here bills, so there is nothing to cap.
         Arc::new(crate::toxicity::cost_meter::ScanCostMeter::new(0, 0)),
     );
@@ -1488,8 +1491,10 @@ pub async fn estimate_full_scan(
     // A scan with nothing to classify drains to `done` instead of pausing;
     // either way, what is still pending is what the GPU would have been sent.
     let posts_to_classify = db.count_pending_classifications(user_did).await?;
+    let direct_requests = stand_in.direct_requests(u64::try_from(posts_to_classify).unwrap_or(0));
     Ok(FullScanEstimate {
         posts_to_classify,
+        direct_requests,
         events: run.events,
         accounts_scored_without_gpu: run.scored,
     })
