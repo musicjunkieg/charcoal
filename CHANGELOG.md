@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- #424 — `charcoal estimate <handle>...` measures what a full scan would cost
+  without paying for it. It runs the production scan body against a
+  throwaway database with a stand-in Stage-2 classifier that pauses the burst
+  on its first batch, exactly as a cost cap does, then counts the posts left
+  pending (the queue a real scan would send to the GPU) plus the quotes and
+  replies the stand-in was asked to score one at a time during discovery. A
+  dollar range comes from RunPod's own bills for three past scans. Each
+  account's database lives in a private temp directory removed even on
+  failure, and the audit logs are forced off, so only the counts remain.
+  Built to model per-account cost before alpha invites.
 - #393 — every full scan and nightly refresh records its estimated GPU cost
   in a new `scan_costs` table (schema v20), success or failure, and logs a
   one-line summary. The admin page shows per-user full-scan, refresh and
@@ -30,6 +40,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   run refuses to start without `CHARCOAL_COPE_B_POLICY_VERSION`.
 
 ### Changed
+- #423 — a full scan no longer checks the GPU endpoint's identity before it
+  gathers. That check woke a worker which idled out during the gather, so the
+  classification burst paid a second cold boot (~$0.30 per scan on the
+  2026-11-01 prod bill). The check now runs on the burst's first uncached
+  post, on the same worker the burst then uses. An endpoint serving the wrong
+  policy still stops the scan before any post is classified, but only after
+  the gather.
+  Also, once the burst decides to stop (cost cap, a failed request, or a
+  refused probe), it no longer sends the rest of the batch to the GPU only to
+  throw the answers away; chunks not yet started are skipped and stay pending.
+- #425 — when the identity check fails, the batches already waiting on it
+  share that one failure instead of each asking the endpoint again. Before,
+  each waiting batch re-ran the check in turn, and on a cold worker each
+  retry could wait out the long warm-up timeout (up to 16 at the default
+  concurrency, 2 on prod's). The shared failure keeps its kind, so a
+  cold-start timeout still pauses the scan for a later resume instead of
+  failing it. A later, separate request still re-checks; only a success is
+  remembered for the whole run (PR #160 review).
 - #344 — `charcoal migrate` copies every score row verbatim
   (`export_scores` / `import_score`), including expired, legacy and
   NotAssessed rows, with their original `scored_at`, revision stamp and

@@ -1390,7 +1390,8 @@ async fn run_scan_inner(
     let scorers = build_scan_scorers(&models, &db)?;
 
     // #393: the meter starts here, so even a scan refused by the Stage-2
-    // identity probe below leaves a cost row — that probe can wake a GPU.
+    // identity probe (paid on the burst's first cache miss, #423) leaves a
+    // cost row — that probe can wake a GPU.
     let started_at = crate::observability::scan_cost::now_rfc3339();
     let run = run_scan_body(
         config,
@@ -1432,6 +1433,73 @@ pub(crate) fn full_scan_cost_outcome(
     }
 }
 
+/// What a free scan estimate measured for one account (#424).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FullScanEstimate {
+    /// Posts the scan's burst would send to the GPU: the queue a real full
+    /// scan builds, before its verdict cache is consulted.
+    pub posts_to_classify: i64,
+    /// GPU requests made outside the queue: quotes and replies scored one at
+    /// a time during discovery. Billed in a live scan like any other.
+    pub direct_requests: u64,
+    /// Amplification events (quotes, reposts, likes, drive-by replies) found.
+    pub events: usize,
+    /// Accounts the gather settled without the GPU (clean and off-topic, or
+    /// too few posts to judge).
+    pub accounts_scored_without_gpu: usize,
+}
+
+/// Run a full scan of `handle` up to the classification burst and report what
+/// it would have sent to the GPU, without sending anything (#424).
+///
+/// This is the production scan body, unchanged: same discovery, same gather,
+/// same ONNX clean pass. Only the Stage-2 backend differs. It is
+/// [`EstimateOnlyClassifier`](crate::toxicity::estimate_only::EstimateOnlyClassifier),
+/// which pauses the burst on its first batch the way a real cost cap does,
+/// leaving every queued post pending to be counted.
+///
+/// `db` should be a throwaway database: this writes the account's scan data
+/// into it. Run against a blank one, the counts are what a brand-new user's
+/// first scan sends.
+pub async fn estimate_full_scan(
+    config: Arc<Config>,
+    db: Arc<dyn Database>,
+    models: Arc<ScanModels>,
+    user_did: &str,
+    handle: &str,
+) -> anyhow::Result<FullScanEstimate> {
+    db.upsert_user(user_did, handle).await?;
+    let stand_in = Arc::new(crate::toxicity::estimate_only::EstimateOnlyClassifier::new());
+    let scorers = crate::web::scan_setup::build_scan_scorers_with(
+        &models,
+        &db,
+        Arc::clone(&stand_in) as Arc<dyn crate::toxicity::classifier::ToxicityClassifier>,
+        // Ceiling 0 = disabled: nothing here bills, so there is nothing to cap.
+        Arc::new(crate::toxicity::cost_meter::ScanCostMeter::new(0, 0)),
+    );
+    let run = run_scan_body(
+        config,
+        Arc::clone(&db),
+        models,
+        Arc::new(RwLock::new(ScanManager::new())),
+        user_did,
+        handle,
+        "estimate",
+        &scorers,
+    )
+    .await?;
+    // A scan with nothing to classify drains to `done` instead of pausing;
+    // either way, what is still pending is what the GPU would have been sent.
+    let posts_to_classify = db.count_pending_classifications(user_did).await?;
+    let direct_requests = stand_in.direct_requests(u64::try_from(posts_to_classify).unwrap_or(0));
+    Ok(FullScanEstimate {
+        posts_to_classify,
+        direct_requests,
+        events: run.events,
+        accounts_scored_without_gpu: run.scored,
+    })
+}
+
 // #393: one call site; `scorers` is the only seam the cost wrapper adds.
 #[allow(clippy::too_many_arguments)]
 async fn run_scan_body(
@@ -1444,10 +1512,12 @@ async fn run_scan_body(
     claim_id: &str,
     scorers: &crate::web::scan_setup::ScanScorers,
 ) -> anyhow::Result<FullScanRun> {
-    // #344 F5: refuse the scan now if the Stage-2 endpoint is not serving the
-    // policy this deployment declared. Discovering it in `map_verdicts`
-    // instead costs a full gather and then skips every account.
-    crate::web::scan_setup::probe_classifier_identity(scorers).await?;
+    // #423: no identity probe here. Probing before the gather woke a GPU
+    // worker that then idled out while the gather ran (minutes), so the burst
+    // cold-booted a second one: about $0.30 of every full scan. The probe now
+    // happens on the burst's first cache miss (`CachedClassifier`), on the
+    // worker the burst then reuses. A wrong policy is still refused before
+    // any post is classified (#344 F5); it just surfaces after the gather.
 
     // Phase 2: embedding model — loaded once at boot, shared via Arc::clone.
     //

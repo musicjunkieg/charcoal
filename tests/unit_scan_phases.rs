@@ -2734,12 +2734,20 @@ mod burst_tests {
 
         // 3 Ok calls, then a transient error. concurrency=1 makes the 3 successes
         // land deterministically before the failure.
-        let classifier: Arc<dyn ToxicityClassifier> =
-            Arc::new(TransientFailClassifier::new(ok_verdict(), 3));
+        let transient = Arc::new(TransientFailClassifier::new(ok_verdict(), 3));
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::clone(&transient) as _;
 
         let outcome = run_burst(&db, BURST_USER, &classifier, 1, 100)
             .await
             .unwrap();
+        // #423: once the burst has decided to stop, it sends nothing more to
+        // the GPU. Calls 5 and 6 would be paid for and their answers thrown
+        // away (and, behind CachedClassifier, each would re-run the probe).
+        assert_eq!(
+            *transient.call_count.lock().unwrap(),
+            4,
+            "no chunk may be sent after the interrupting failure"
+        );
         assert!(
             matches!(outcome, BurstOutcome::Interrupted),
             "transient classifier error should interrupt resumably, got {:?}",
@@ -2993,6 +3001,200 @@ mod burst_tests {
         assert_eq!(
             db.count_pending_classifications(BURST_USER).await.unwrap(),
             2
+        );
+    }
+
+    // ── Test: a refused identity probe stops the burst before any verdict ──
+    //
+    // #423: the full scan no longer probes the endpoint before it gathers.
+    // The probe now happens lazily, on the burst's first cache miss, so the
+    // worker it wakes is still warm for the burst instead of idling out
+    // during the gather and cold-booting a second time. That moves the
+    // #344 F5 guarantee here: an endpoint serving the wrong policy must
+    // refuse the scan before it classifies a single post, and every row
+    // must stay pending (no verdict, and no benign sentinel either).
+
+    /// Refuses its identity probe, as an endpoint serving another policy
+    /// does, and counts every classify call it is asked to make.
+    struct RefusingProbeClassifier {
+        classified: AtomicUsize,
+        probes: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for RefusingProbeClassifier {
+        async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+            self.classified.fetch_add(1, Ordering::SeqCst);
+            Ok(ok_verdict())
+        }
+        async fn probe_identity(&self) -> Result<()> {
+            self.probes.fetch_add(1, Ordering::SeqCst);
+            // A real probe is a network round trip. Without one the first
+            // chunk's probe fails before any other chunk reaches it, and the
+            // test could not see chunks queueing behind a failing probe.
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            anyhow::bail!("endpoint serves policy other-policy, deployment declares stub")
+        }
+        fn name(&self) -> &'static str {
+            "refusing-probe"
+        }
+        fn model_id(&self) -> &'static str {
+            "stub"
+        }
+        fn policy_version(&self) -> &'static str {
+            "stub"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+    }
+
+    #[tokio::test]
+    async fn a_refused_probe_aborts_the_burst_before_any_verdict() {
+        use charcoal::observability::cache_stats::CacheStats;
+        use charcoal::toxicity::cached_classifier::CachedClassifier;
+
+        let db = open_burst_db().await;
+        let acct = "did:plc:burst010";
+        let rows: Vec<QueueRow> = (0..6).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        // The production wrapper, which is where the lazy probe lives.
+        let inner = Arc::new(RefusingProbeClassifier {
+            classified: AtomicUsize::new(0),
+            probes: AtomicUsize::new(0),
+        });
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(CachedClassifier::new(
+            Arc::clone(&inner) as Arc<dyn ToxicityClassifier>,
+            Arc::clone(&db),
+            Arc::new(CacheStats::default()),
+        ));
+
+        // Requirement: the refusal fails the scan (an Err, not a resumable
+        // pause that would retry the same wrong endpoint forever).
+        let err = run_burst(&db, BURST_USER, &classifier, 4, 100)
+            .await
+            .expect_err("a refused probe must abort the burst");
+        assert!(
+            format!("{err:#}").contains("other-policy"),
+            "the refusal must reach the scan with its reason, got: {err:#}"
+        );
+        // Requirement: nothing was sent for classification.
+        assert_eq!(inner.classified.load(Ordering::SeqCst), 0);
+        // Requirement: the refusal is asked exactly once. The chunks already
+        // in flight when it failed (up to the concurrency, 4) were waiting on
+        // that same probe and must share its answer rather than each asking
+        // again, which on a cold worker waits out the long warm-up timeout
+        // per chunk (PR #160 review). The other chunks must never start.
+        let probes = inner.probes.load(Ordering::SeqCst);
+        assert_eq!(
+            probes, 1,
+            "probed {probes} times for 6 chunks at concurrency 4"
+        );
+        // Requirement: no row was recorded, so nothing foreign or sentinel
+        // can be scored and a fixed endpoint can redo all six.
+        assert_eq!(
+            db.count_pending_classifications(BURST_USER).await.unwrap(),
+            6
+        );
+    }
+
+    // ── Test: the free estimate's stand-in stops the burst untouched (#424) ──
+    //
+    // `charcoal estimate` reads the scan's queued-post count after the burst
+    // stops. That number is only the cost of a real scan if the stand-in, run
+    // through the production wrapper, leaves the queue exactly as gather left
+    // it: no verdict, no benign sentinel, and a resumable pause, not an error.
+    #[tokio::test]
+    async fn the_estimate_stand_in_pauses_the_burst_with_every_row_pending() {
+        use charcoal::observability::cache_stats::CacheStats;
+        use charcoal::toxicity::cached_classifier::CachedClassifier;
+        use charcoal::toxicity::estimate_only::EstimateOnlyClassifier;
+
+        let db = open_burst_db().await;
+        let acct = "did:plc:burst012";
+        let rows: Vec<QueueRow> = (0..6).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        let stand_in = Arc::new(EstimateOnlyClassifier::new());
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(CachedClassifier::new(
+            Arc::clone(&stand_in) as Arc<dyn ToxicityClassifier>,
+            Arc::clone(&db),
+            Arc::new(CacheStats::default()),
+        ));
+
+        // Requirement: a pause the estimate can read, not a failed scan.
+        // Concurrency 1, as `charcoal estimate` runs it.
+        let outcome = run_burst(&db, BURST_USER, &classifier, 1, 100)
+            .await
+            .expect("the stand-in must pause the burst, not fail it");
+        assert_eq!(outcome, BurstOutcome::CostCapped);
+        // Requirement: every queued post is still counted as pending.
+        assert_eq!(
+            db.count_pending_classifications(BURST_USER).await.unwrap(),
+            6
+        );
+        // Requirement: the burst's refusal is never also counted as a direct
+        // request. At concurrency 1 the refusal stops the burst before its
+        // second chunk starts, so exactly one call is refused and it is the
+        // one `direct_requests` sets aside.
+        assert_eq!(stand_in.direct_requests(6), 0);
+    }
+
+    /// Answers every request with one outcome too many, breaking the
+    /// positional contract, and counts the requests it was sent.
+    struct WrongLengthClassifier {
+        requests: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for WrongLengthClassifier {
+        async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+            Ok(ok_verdict())
+        }
+        async fn classify_batch(&self, contents: &[String]) -> Result<Vec<ItemOutcome>> {
+            self.requests.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![ItemOutcome::Verdict(ok_verdict()); contents.len() + 1])
+        }
+        fn name(&self) -> &'static str {
+            "wrong-length"
+        }
+        fn model_id(&self) -> &'static str {
+            "stub"
+        }
+        fn policy_version(&self) -> &'static str {
+            "stub"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+    }
+
+    // Requirement (#423): a batch-length contract violation aborts the burst
+    // AND stops it sending more chunks, like any other stop. One bad answer
+    // already proves the endpoint is broken; paying for five more is waste.
+    #[tokio::test]
+    async fn a_length_mismatch_aborts_without_sending_further_chunks() {
+        let db = open_burst_db().await;
+        let acct = "did:plc:burst011";
+        let rows: Vec<QueueRow> = (0..6).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        let inner = Arc::new(WrongLengthClassifier {
+            requests: AtomicUsize::new(0),
+        });
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::clone(&inner) as _;
+
+        // Concurrency 1 makes "the first answer arrives before any other
+        // chunk starts" deterministic.
+        let err = run_burst(&db, BURST_USER, &classifier, 1, 100)
+            .await
+            .expect_err("a length mismatch must abort the burst");
+        assert!(format!("{err:#}").contains("length mismatch"), "{err:#}");
+        assert_eq!(inner.requests.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            db.count_pending_classifications(BURST_USER).await.unwrap(),
+            6
         );
     }
 

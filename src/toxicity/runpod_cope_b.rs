@@ -707,13 +707,13 @@ impl ToxicityClassifier for RunPodCopeBClient {
         cope_b_expected_policy()
     }
 
-    /// #344 F5: one probe request at scan start instead of a whole scan's
-    /// worth of foreign evidence.
+    /// #344 F5: one probe request before the first real batch instead of a
+    /// whole scan's worth of foreign evidence.
     ///
     /// The divergence is otherwise only visible in `map_verdicts` — after the
     /// endpoint has been paid for every batch, and with every account facing a
     /// re-gather and then a skip. Here it costs one round trip (the same
-    /// warm-up that absorbs FlashBoot's cold start) and the scan never starts.
+    /// warm-up that absorbs FlashBoot's cold start) and nothing is classified.
     async fn probe_identity(&self) -> Result<()> {
         warm_up(self).await
     }
@@ -722,9 +722,9 @@ impl ToxicityClassifier for RunPodCopeBClient {
     }
 }
 
-/// Helper for the scan manager: invoke once at the start of a scan to absorb
-/// FlashBoot cold start into the "warming up" UX message. Same retry policy,
-/// longer timeout.
+/// Invoked once per run, right before the first real batch (#423), to absorb
+/// FlashBoot's cold start under a longer timeout; the worker it wakes is then
+/// still warm for the batches that follow. Same retry policy.
 ///
 /// It is also the policy probe (#344 F5): the response carries the endpoint's
 /// own `policy_version`, so this is the cheapest place in a scan's life to

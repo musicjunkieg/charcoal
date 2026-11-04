@@ -187,6 +187,22 @@ pub(crate) fn build_scan_scorers(
     models: &ScanModels,
     db: &Arc<dyn Database>,
 ) -> anyhow::Result<ScanScorers> {
+    // #393: the meter is created here, not inside the classifier, so the
+    // scan can read what it spent when it finishes.
+    let cost_meter = Arc::new(crate::toxicity::cost_meter::ScanCostMeter::from_env());
+    let inner = crate::toxicity::classifier::build_from_env_with_meter(Arc::clone(&cost_meter))?;
+    Ok(build_scan_scorers_with(models, db, inner, cost_meter))
+}
+
+/// [`build_scan_scorers`] over a caller-chosen Stage-2 backend. The free scan
+/// estimate (#424) passes its stand-in here; everything around the backend
+/// (both caches, the counters) is the production stack, unchanged.
+pub(crate) fn build_scan_scorers_with(
+    models: &ScanModels,
+    db: &Arc<dyn Database>,
+    inner: Arc<dyn crate::toxicity::classifier::ToxicityClassifier>,
+    cost_meter: Arc<crate::toxicity::cost_meter::ScanCostMeter>,
+) -> ScanScorers {
     // #343 Phase 1: stage-1 / clean-pass ONNX scores are cached by text hash
     // across users. Hit/miss counts are persisted at the end of the scan.
     let onnx_stats = Arc::new(CacheStats::default());
@@ -203,12 +219,9 @@ pub(crate) fn build_scan_scorers(
     // configured Stage-2 classifier (CHARCOAL_CLASSIFIER) for a binary verdict.
     // #343 Phase 1: stage-2 verdicts are cached by (text hash, model, policy).
     let classifier_stats = Arc::new(CacheStats::default());
-    // #393: the meter is created here, not inside the classifier, so the
-    // scan can read what it spent when it finishes.
-    let cost_meter = Arc::new(crate::toxicity::cost_meter::ScanCostMeter::from_env());
     let classifier: Arc<dyn crate::toxicity::classifier::ToxicityClassifier> =
         Arc::new(crate::toxicity::cached_classifier::CachedClassifier::new(
-            crate::toxicity::classifier::build_from_env_with_meter(Arc::clone(&cost_meter))?,
+            inner,
             Arc::clone(db),
             Arc::clone(&classifier_stats),
         ));
@@ -223,28 +236,12 @@ pub(crate) fn build_scan_scorers(
     // Concrete scorer (not boxed as `dyn`): the phased scan pipeline (#208)
     // needs the `TwoStageToxicityScorer`'s inherent `classifier()` accessor and
     // its `CleanPassScorer` impl, both of which a `dyn ToxicityScorer` erases.
-    Ok(ScanScorers {
+    ScanScorers {
         scorer: TwoStageToxicityScorer::new(primary_scorer, classifier),
         onnx_stats,
         classifier_stats,
         cost_meter,
-    })
-}
-
-/// Confirm the out-of-binary Stage-2 classifier is serving the identity this
-/// deployment declared, BEFORE the scan gathers anything (#344 F5).
-///
-/// Separate from `build_scan_scorers` because it is the only part of setup
-/// that does I/O. Only the full scan calls it up front, as a fail-fast check
-/// before a long user-requested gather; the refresh relies on the lazy probe
-/// `CachedClassifier` pays on its first cache miss (#394), and this call
-/// counts as that probe, so a full scan still pays one round trip, not two.
-/// A hard error on purpose: a mismatched policy means every
-/// verdict this scan produces is foreign evidence, so the accounts are
-/// re-gathered and then skipped — hours of work for nothing. Refusing the
-/// start costs one round trip and names the variable to fix.
-pub(crate) async fn probe_classifier_identity(scorers: &ScanScorers) -> anyhow::Result<()> {
-    scorers.scorer.classifier().probe_identity().await
+    }
 }
 
 /// Persist both cache counters. Best-effort by construction: telemetry must

@@ -431,7 +431,7 @@ async fn the_first_miss_probes_once_before_classifying() {
     );
 }
 
-/// An explicit probe (the full scan's fail-fast check at start) counts as the
+/// An explicit `probe_identity` call (e.g. the eval runner's) counts as the
 /// run's probe: the first miss afterwards does not pay a second one.
 #[tokio::test]
 async fn an_explicit_probe_is_not_repeated_by_the_first_miss() {
@@ -470,4 +470,72 @@ async fn a_refused_probe_fails_the_batch_and_is_not_memoised() {
 
     c.classify_batch(&texts(&["one"])).await.unwrap_err();
     assert_eq!(inner.probes(), 2, "a failed probe is retried, not cached");
+}
+
+/// Probes slowly, like a cold worker, then fails with a transient error.
+struct SlowTransientProbe {
+    probes: AtomicUsize,
+}
+
+#[async_trait]
+impl ToxicityClassifier for SlowTransientProbe {
+    async fn classify(&self, _content: &str) -> anyhow::Result<ClassifierVerdict> {
+        anyhow::bail!("never reached: the probe fails first")
+    }
+    async fn probe_identity(&self) -> anyhow::Result<()> {
+        self.probes.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        Err(
+            charcoal::toxicity::classifier::ClassifierTransientError::new("warm-up timed out")
+                .into(),
+        )
+    }
+    fn name(&self) -> &'static str {
+        "slow-transient"
+    }
+    fn model_id(&self) -> &'static str {
+        "fake-model"
+    }
+    fn policy_version(&self) -> &'static str {
+        "v1"
+    }
+    fn threshold(&self) -> f32 {
+        0.5
+    }
+}
+
+/// Requirement (PR #160 review): batches that were already waiting on a probe
+/// that fails share that one failure instead of each probing again, and the
+/// shared failure is still TRANSIENT. The burst pauses resumably on a
+/// transient error and fails the scan on any other, so replaying a cold-start
+/// timeout as a plain error would turn a pause into a failed scan.
+#[tokio::test]
+async fn waiters_share_one_failed_probe_and_keep_its_kind() {
+    use charcoal::toxicity::classifier::ClassifierTransientError;
+
+    let db = setup_db();
+    let inner = Arc::new(SlowTransientProbe {
+        probes: AtomicUsize::new(0),
+    });
+    let c = CachedClassifier::new(
+        Arc::clone(&inner) as Arc<dyn ToxicityClassifier>,
+        Arc::clone(&db),
+        Arc::new(CacheStats::default()),
+    );
+
+    let batches = [texts(&["a"]), texts(&["b"]), texts(&["c"]), texts(&["d"])];
+    let results = futures::future::join_all(batches.iter().map(|b| c.classify_batch(b))).await;
+
+    assert_eq!(
+        inner.probes.load(Ordering::SeqCst),
+        1,
+        "one probe for four waiting batches"
+    );
+    for r in results {
+        let err = r.expect_err("every waiting batch fails with the probe");
+        assert!(
+            err.downcast_ref::<ClassifierTransientError>().is_some(),
+            "the shared failure must stay transient, got {err:#}"
+        );
+    }
 }

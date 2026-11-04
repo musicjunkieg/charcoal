@@ -152,3 +152,96 @@ impl TypeaheadLimiter {
         }
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Whitespace that `str::trim` strips, including non-ASCII spaces a
+    /// pasted handle can carry (no-break space, ideographic space, em space).
+    fn ws() -> impl Strategy<Value = char> {
+        prop_oneof![
+            Just(' '),
+            Just('\t'),
+            Just('\n'),
+            Just('\u{a0}'),
+            Just('\u{2003}'),
+            Just('\u{3000}'),
+        ]
+    }
+
+    /// Queries concentrated where bugs live: a body whose length sits on or
+    /// next to MIN_QUERY_CHARS and MAX_QUERY_CHARS (or anywhere in between),
+    /// built from multi-byte characters, wrapped in whitespace padding.
+    fn boundary_query() -> impl Strategy<Value = String> {
+        let body_len = prop_oneof![
+            0..=MIN_QUERY_CHARS + 1,
+            MAX_QUERY_CHARS - 1..=MAX_QUERY_CHARS + 2,
+            0..=MAX_QUERY_CHARS + 20,
+        ];
+        let body_char = prop_oneof![Just('a'), Just('.'), Just('é'), Just('漢'), Just('🦀')];
+        (
+            prop::collection::vec(ws(), 0..4),
+            body_len.prop_flat_map(move |n| prop::collection::vec(body_char.clone(), n)),
+            prop::collection::vec(ws(), 0..4),
+        )
+            .prop_map(|(l, body, r)| l.into_iter().chain(body).chain(r).collect())
+    }
+
+    /// Any printable text, plus the boundary-focused queries above.
+    fn query() -> impl Strategy<Value = String> {
+        prop_oneof!["\\PC{0,300}", boundary_query()]
+    }
+
+    proptest! {
+        // Invariant 1: an accepted query is exactly the input with surrounding
+        // whitespace removed, and its length in chars is within
+        // MIN_QUERY_CHARS..=MAX_QUERY_CHARS. Nothing else is altered.
+        #[test]
+        fn accepted_query_is_the_trimmed_input_within_bounds(raw in query()) {
+            if let Some(q) = normalize_query(&raw) {
+                prop_assert_eq!(q.as_str(), raw.trim());
+                let n = q.chars().count();
+                prop_assert!((MIN_QUERY_CHARS..=MAX_QUERY_CHARS).contains(&n));
+            }
+        }
+
+        // Invariant 2: a query is rejected only when its trimmed length is out
+        // of bounds, so every in-bounds query reaches upstream.
+        #[test]
+        fn rejected_only_when_trimmed_length_out_of_bounds(raw in query()) {
+            let n = raw.trim().chars().count();
+            let in_bounds = (MIN_QUERY_CHARS..=MAX_QUERY_CHARS).contains(&n);
+            prop_assert_eq!(normalize_query(&raw).is_some(), in_bounds);
+        }
+
+        // Invariant 3: surrounding whitespace (ASCII or not) never changes the
+        // outcome, and normalizing an accepted query again is a no-op.
+        #[test]
+        fn padding_is_irrelevant_and_normalizing_is_idempotent(
+            core in query(),
+            pad_l in prop::collection::vec(ws(), 0..5),
+            pad_r in prop::collection::vec(ws(), 0..5),
+        ) {
+            let padded: String = pad_l.into_iter().chain(core.chars()).chain(pad_r).collect();
+            prop_assert_eq!(normalize_query(&padded), normalize_query(&core));
+            if let Some(q) = normalize_query(&core) {
+                prop_assert_eq!(normalize_query(&q), Some(q.clone()));
+            }
+        }
+
+        // Invariant 4: the char count, not the byte count, is what is bounded,
+        // and both edges are exact: MIN and MAX are accepted, one below MIN and
+        // one above MAX are rejected, whatever the character's byte width.
+        #[test]
+        fn bounds_are_exact_and_count_chars_not_bytes(c in "[a.é漢🦀]") {
+            let ch = c.chars().next().unwrap();
+            let of_len = |n: usize| -> String { std::iter::repeat_n(ch, n).collect() };
+            prop_assert!(normalize_query(&of_len(MIN_QUERY_CHARS - 1)).is_none());
+            prop_assert!(normalize_query(&of_len(MIN_QUERY_CHARS)).is_some());
+            prop_assert!(normalize_query(&of_len(MAX_QUERY_CHARS)).is_some());
+            prop_assert!(normalize_query(&of_len(MAX_QUERY_CHARS + 1)).is_none());
+        }
+    }
+}

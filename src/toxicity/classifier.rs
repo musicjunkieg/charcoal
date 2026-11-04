@@ -71,15 +71,16 @@ pub trait ToxicityClassifier: Send + Sync {
         1
     }
 
-    /// Contact the backend once at scan start and confirm it is serving the
-    /// identity this deployment declared (#344 F5).
+    /// Contact the backend once per run, just before its first real batch
+    /// (`CachedClassifier` calls it on the first cache miss, #394/#423), and
+    /// confirm it is serving the identity this deployment declared (#344 F5).
     ///
     /// Default: `Ok(())` — an in-binary or scripted backend cannot disagree
     /// with itself. Backends that run OUTSIDE the binary override it, because
     /// their identity is a deployment variable and a wrong one is otherwise
     /// only discovered in `map_verdicts`, after the endpoint has been paid for
     /// a whole scan's batches and every account has to be re-gathered.
-    /// Refusing the start turns that into a scan that never began.
+    /// Refusing here turns that into a scan that classified nothing.
     async fn probe_identity(&self) -> Result<()> {
         Ok(())
     }

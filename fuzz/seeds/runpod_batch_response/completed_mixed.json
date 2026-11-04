@@ -1,0 +1,1 @@
+{"status":"COMPLETED","delayTime":13074,"executionTime":120977,"output":{"verdicts":[{"ok":true,"toxic":true,"confidence":0.8,"model":"cope-b-a4b","policy_version":"p1"},{"ok":false,"error":"unexpected model token"}]}}

@@ -132,6 +132,26 @@ Options:
 This is slower than `scan` (potentially thousands of API calls) and is
 designed for periodic use rather than continuous monitoring.
 
+### Estimate a full scan's cost for free (optional)
+
+```bash
+cargo run --release --features web -- estimate someone.bsky.social other.example.com
+```
+
+Runs the real web full scan for each account (discovery, gather, the local
+ONNX clean pass) and stops at the GPU step. It reports how many posts the scan
+would send to the Stage-2 classifier, in two parts: the posts queued for the
+classification burst, and the quotes and replies scored one at a time during
+discovery. It adds a billed-cost range calibrated against RunPod's actual bills
+(`src/observability/scan_estimate.rs`), which assumes production's burst
+concurrency. Nothing is sent to RunPod and no RunPod settings are needed. Each
+account runs in its own private, throwaway SQLite database, deleted afterwards
+even if the scan fails, and the audit logs are switched off for the run, so
+only the printed counts remain. The count is a brand-new user's first scan; a
+live scan can send fewer, because verdicts cached from other users' scans are
+free and identical texts in one batch are sent once. Expect a few minutes per
+account.
+
 ### 8. View results
 
 **Score a single account:**
@@ -278,14 +298,22 @@ blank means `policy-unknown`.
 **What happens if it does not match.** A stored verdict records the policy that
 actually produced it, and a score may only be published from verdicts this
 binary recognises. So a mismatched value means every Stage-2 verdict is foreign
-evidence: every account is re-gathered once and then skipped, and no scores are
-written. To make that cheap to find rather than expensive to discover:
+evidence: every account is re-gathered once and then skipped, and no
+classifier-based score is written. (Accounts the gather settles on its own,
+from the local ONNX clean pass or too few posts, are still scored: those
+scores never consult the Stage-2 policy.) To make that cheap to find rather
+than expensive to discover:
 
-- **the web scan paths probe the endpoint before they gather anything** and
-  refuse to start, naming both values and this variable. That is a scan
+- **the web scan paths probe the endpoint before they classify anything** and
+  fail the scan, naming both values and this variable. That is a scan
   started from the dashboard (`src/web/scan_job.rs`) and the nightly refresh
-  job (`src/web/refresh_scan.rs`, which probes whenever it actually has work
-  to do — candidates due, or its own resumable staging to finish);
+  job (`src/web/refresh_scan.rs`). The probe is the first contact of the run
+  with the endpoint: it happens on the first post that is not already in the
+  verdict cache, right before that post would be classified (#394, #423). A
+  dashboard scan therefore still gathers first and only then refuses; that
+  costs Bluesky fetching time and the probe's own round trip, which can wake
+  a billed GPU worker, but no user post is sent for Stage-2 classification.
+  In exchange, every correctly configured scan saves a second cold boot;
 - **the CLI does not probe.** `charcoal scan` and `charcoal sweep`
   (`src/main.rs`) call the pipelines directly, with no probe in front of them.
   On those two commands a wrong value still costs what the probe exists to

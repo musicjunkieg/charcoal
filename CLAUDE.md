@@ -54,7 +54,8 @@ next time. Break large tasks into Chainlink issues with subissues.
 
 **TDD workflow.** Write/finalize the spec, produce a test-driven implementation
 plan, then implement. Always leave a handoff note at the end of planning
-sessions.
+sessions. Tests follow the **Testing rules** below (properties, fuzzing,
+mutation testing), not example snapshots.
 
 **CRITICAL: Deciduous decision logging is mandatory — not aspirational.**
 Use Deciduous (https://crates.io/crates/deciduous) to log every meaningful
@@ -95,6 +96,43 @@ Tests live in `tests/` (see the filenames — they're named by area) plus inline
 `#[cfg(test)]` modules. `cargo test` runs unit, doc, and integration tests; use
 `cargo test --all-targets` in CI so benches and examples also compile.
 
+#### Testing rules
+
+- Do NOT write example-based unit tests that assert current output.
+  Scratch tests while developing are fine; delete them before finishing.
+- For pure functions: write property tests (fast-check / proptest).
+  State the invariant in a comment before writing the test.
+- After implementing a function, run it live with real inputs and
+  show me the actual output.
+- Parsers, decoders, anything taking untrusted input (CIDs, CAR files,
+  lexicon records): add a fuzz target.
+- Before calling a task done: run mutation testing on changed files
+  (Stryker / cargo-mutants). Kill surviving mutants with new property
+  tests or explain why each survivor is equivalent.
+- Never "fix" a failing test by changing its expected value without
+  telling me why the old expectation was wrong.
+
+How these apply in this repo (decided 2026-11-01, #419):
+
+- **They govern new and changed code.** The existing example-based suite is
+  not deleted wholesale. When you change a function that an example test
+  covers, replace that test with properties where the function is pure.
+- **Code that is not a pure function** (database methods, HTTP handlers, the
+  scan pipeline) still gets integration tests, but each assertion must state
+  the requirement it checks in a comment, never "whatever it returns today".
+  Mutation-check them: break the code on purpose and show the test fails.
+- **TDD still holds:** write the invariant and its property test first.
+- **Untrusted input here** is mostly not CIDs or CAR files (Charcoal parses
+  neither today). It is: RunPod response bodies (`parse_batch_response`),
+  Bluesky and Constellation JSON, AT URIs, DIDs and handles, session cookies,
+  query strings (`normalize_query`), and env-var values parsed at startup
+  (`parse_refresh_interval`, `parse_onnx_sessions`). These get fuzz targets.
+- **Mutation testing is scoped to the diff**, which keeps it consistent with
+  not hand-running full suites: `cargo mutants --in-diff <diff file>` for
+  Rust, Stryker with `--mutate <changed files>` for `web/`.
+- **If a required tool is not installed, stop and say so.** Do not skip the
+  step silently or report the task done without it.
+
 **⚠️ Model-gated tests silently skip and still print `ok`.** Every test that
 loads a real ONNX model returns early when the model files aren't found, having
 asserted nothing. Two traps stack here:
@@ -133,6 +171,40 @@ role named after your OS account and no `charcoal` role, so that URL dies with
 `FATAL: role "charcoal" does not exist` (#272). Use `$USER` as above, or create
 the role once with `createuser -s charcoal`. If the database is missing,
 `createdb charcoal_test` first.
+
+#### Property, fuzz and mutation tooling (#420)
+
+- **Property tests** — Rust: `proptest` (dev-dependency), inline in a
+  `#[cfg(test)] mod props` next to the function (example:
+  `src/web/typeahead.rs`). Frontend: `fast-check`, in a
+  `*.property.test.ts` file (example: `web/src/lib/scan-costs.property.test.ts`).
+- **Fuzzing** — targets live in `fuzz/fuzz_targets/`, committed seed inputs
+  in `fuzz/seeds/<target>/`. Always run through the script, never plain
+  `cargo fuzz run`: it re-syncs `fuzz/Cargo.lock` from the app's lockfile and
+  works around a nightly compiler bug (details in the script header).
+  ```
+  scripts/fuzz.sh --list
+  scripts/fuzz.sh runpod_batch_response 120   # seconds
+  ```
+  A crash leaves the input in `fuzz/artifacts/<target>/`; turn it into a
+  failing test before fixing.
+- **Mutation testing, Rust** — scope to the changed files, and keep the
+  scratch output out of the repo:
+  ```
+  cargo mutants -f src/path/changed.rs --features web -o "$TMPDIR" -- --lib
+  ```
+  Add `--re <fn name>` to narrow to one function. Each mutant rebuilds the
+  crate (~30 s each with `web`), so a big file takes many minutes.
+- **Mutation testing, frontend** — Stryker, configured in
+  `web/stryker.config.json`. Run it in a SUBSHELL so the persistent shell
+  never parks in `web/` (a shell parked there makes chainlink create a stray
+  `web/.chainlink/`, and the work-check hook then blocks every command until
+  a human deletes it — happened 2026-11-01):
+  ```
+  (cd web && npx stryker run --mutate src/lib/changed.ts)
+  ```
+  On a fresh checkout run `(cd web && npx svelte-kit sync)` once first:
+  `web/tsconfig.json` extends the generated `.svelte-kit/tsconfig.json`.
 
 ### Git hooks
 
