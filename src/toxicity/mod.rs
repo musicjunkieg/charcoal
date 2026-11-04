@@ -11,6 +11,7 @@ pub mod cost_meter;
 pub mod detoxify_classifier;
 pub mod download;
 pub mod ensemble;
+pub mod estimate_only;
 pub mod onnx;
 pub mod perspective;
 pub mod rate_limiter;

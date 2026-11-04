@@ -10,3 +10,4 @@ pub mod classifier_metrics;
 pub mod cpu_sample;
 pub mod refresh_metrics;
 pub mod scan_cost;
+pub mod scan_estimate;
