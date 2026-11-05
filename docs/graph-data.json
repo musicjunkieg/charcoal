@@ -13760,6 +13760,17 @@
       "created_at": "2026-11-04T17:24:32.903322-08:00",
       "updated_at": "2026-11-04T17:24:32.903322-08:00",
       "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"confidence\":85}"
+    },
+    {
+      "id": 1261,
+      "change_id": "92512aee-e1f6-42e5-a829-4c025e379b2c",
+      "node_type": "action",
+      "title": "Opened PR #164 (#427 arena shrink) against staging",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T17:28:44.365242-08:00",
+      "updated_at": "2026-11-04T17:28:44.365242-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"commit\":\"5c7b397\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -28095,6 +28106,17 @@
       "weight": 1.0,
       "rationale": "agreed next steps for throughput",
       "created_at": "2026-11-04T17:24:36.923869-08:00"
+    },
+    {
+      "id": 1314,
+      "from_node_id": 1258,
+      "to_node_id": 1261,
+      "from_change_id": "cf147a6c-8f83-490d-bad0-e93a179687cc",
+      "to_change_id": "92512aee-e1f6-42e5-a829-4c025e379b2c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "verified fix submitted for review",
+      "created_at": "2026-11-04T17:28:47.806292-08:00"
     }
   ],
   "documents": [

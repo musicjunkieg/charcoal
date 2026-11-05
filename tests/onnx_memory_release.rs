@@ -23,13 +23,32 @@ use charcoal::topics::embeddings::SentenceEmbedder;
 use charcoal::toxicity::onnx::OnnxToxicityScorer;
 use charcoal::toxicity::traits::ToxicityScorer;
 use serial_test::serial;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-fn model_dir() -> Option<PathBuf> {
-    let base = std::env::var("CHARCOAL_MODEL_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| charcoal::toxicity::download::default_model_dir());
-    charcoal::toxicity::download::model_files_present(&base).then_some(base)
+/// The model directory to test against, or `None` to skip.
+///
+/// Skipping is only allowed when nobody asked for the models. A NON-BLANK
+/// `CHARCOAL_MODEL_DIR` is an explicit request — CI sets it — so a directory
+/// missing the files `present` checks for is a broken setup and must fail.
+/// Skipping there would print `SKIP:` and pass without measuring anything,
+/// the silent-skip trap CLAUDE.md warns about. The base path comes from the
+/// shared resolver so a blank value falls back to the default directory the
+/// same way production does.
+fn model_dir_or_skip(present: fn(&Path) -> bool, what: &str) -> Option<PathBuf> {
+    let explicit = std::env::var("CHARCOAL_MODEL_DIR")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    let base = charcoal::toxicity::download::resolve_model_dir();
+    if present(&base) {
+        return Some(base);
+    }
+    assert!(
+        explicit.is_none(),
+        "CHARCOAL_MODEL_DIR={} has no {what} model files — the memory test was asked to run \
+         and cannot",
+        base.display()
+    );
+    None
 }
 
 /// (current RSS, peak RSS since the last reset), in MB, from /proc.
@@ -84,11 +103,16 @@ fn assert_released(label: &str, before: f64, after: f64, peak: f64) {
     );
 }
 
+/// Requirement: after scoring a large batch, the toxicity model gives back at
+/// least half the memory the batch added (see [`assert_released`]).
 #[tokio::test]
 #[serial]
 async fn toxicity_batch_memory_is_returned() {
-    let Some(dir) = model_dir() else {
-        eprintln!("SKIP: models not present");
+    let Some(dir) = model_dir_or_skip(
+        charcoal::toxicity::download::model_files_present,
+        "toxicity",
+    ) else {
+        eprintln!("SKIP: toxicity model not present");
         return;
     };
     let scorer = OnnxToxicityScorer::load(&dir).expect("load toxicity model");
@@ -104,11 +128,16 @@ async fn toxicity_batch_memory_is_returned() {
     assert_released("toxicity", before, after, peak);
 }
 
+/// Requirement: after embedding a large batch, the embedding model gives back
+/// at least half the memory the batch added (see [`assert_released`]).
 #[tokio::test]
 #[serial]
 async fn embedding_batch_memory_is_returned() {
-    let Some(dir) = model_dir() else {
-        eprintln!("SKIP: models not present");
+    let Some(dir) = model_dir_or_skip(
+        charcoal::toxicity::download::embedding_files_present,
+        "embedding",
+    ) else {
+        eprintln!("SKIP: embedding model not present");
         return;
     };
     let embedder = SentenceEmbedder::load(&charcoal::toxicity::download::embedding_model_dir(&dir))
