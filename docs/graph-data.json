@@ -13617,6 +13617,149 @@
       "created_at": "2026-11-03T18:01:03.062508-08:00",
       "updated_at": "2026-11-03T18:01:03.062508-08:00",
       "metadata_json": "{\"branch\":\"feat/424-scan-estimate\",\"commit\":\"fe59973\",\"confidence\":90}"
+    },
+    {
+      "id": 1248,
+      "change_id": "8ac0eeba-709a-4fad-a12b-16c5a9424da1",
+      "node_type": "action",
+      "title": "Sync main's promotion history into staging via PR #163 (no file changes) so PR #160 is up to date",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-03T21:52:13.016014-08:00",
+      "updated_at": "2026-11-03T21:52:13.016014-08:00",
+      "metadata_json": "{\"branch\":\"chore/sync-main-into-staging\",\"commit\":\"3bc7836\",\"confidence\":90}"
+    },
+    {
+      "id": 1249,
+      "change_id": "c1b42c8e-3633-4a52-9941-94ce46782cb5",
+      "node_type": "outcome",
+      "title": "PR #160 on prod (82b1f9a, deploy fbba0460): health 200, no errors; #423 single cold boot + #425 + #424 estimate live",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-03T22:12:35.282706-08:00",
+      "updated_at": "2026-11-03T22:12:35.282706-08:00",
+      "metadata_json": "{\"branch\":\"chore/sync-main-into-staging\",\"commit\":\"82b1f9a\",\"confidence\":95}"
+    },
+    {
+      "id": 1250,
+      "change_id": "279c85a4-4039-4b20-88e1-362ab97b0fcc",
+      "node_type": "goal",
+      "title": "Railway cost + scan speed tuning on Railway (#426)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T16:22:26.059539-08:00",
+      "updated_at": "2026-11-04T16:22:26.059539-08:00",
+      "metadata_json": "{\"branch\":\"sesh/charcoal-railway-cost-scan-tuning\",\"confidence\":90,\"prompt\":\"Bryan keeps exceeding the Railway $20 Pro plan for charcoal (two environments, production and staging, each charcoal-web + Postgres). He wants to stay on Railway and tune cost and scan speed there rather than move hosts. Follow this repo's CLAUDE.md for workflow (chainlink issue first, deciduous logging, branch + PR per its branching rules — check which branch PRs target, staging vs main —, conventional commits, discriminating tests, CodeRabbit review). Note: in this setup Bryan may perform git pushes himself if a hook blocks you; if so, hand him single-line commands.\\n\\nEvidence gathered so far (from `railway metrics`, last 7 days, 2026-10-28..11-04):\\n- prod charcoal-web: memory avg 2.74 GB, peak 5.1 GB; CPU avg 0.03 vCPU, peak ~3.1 vCPU\\n- staging charcoal-web: memory avg 1.65 GB, peak 5.0 GB; CPU avg 0.05, peak ~4.8\\n- Postgres prod/staging: ~0.2 GB avg memory each\\n=> ~4.8 GB held 24/7; memory, not CPU, drives the bill. CHANGELOG/spec say idle after model preload is ~1.3 GB, so prod's 2.7 GB average suggests heap not returned after scans.\\n- charcoal has NO global allocator (glibc malloc). In the sibling project soot (~/Code/soot, PR #21) glibc arena fragmentation held ~31-42 GB anon RSS under multithreaded load; switching to mimalloc dropped it to ~1 GB. See ~/Code/soot/src/lib.rs (#[global_allocator] in the LIBRARY so tests and every binary use it) and ~/Code/soot/tests/allocator.rs (discriminating test: Rust heap pointer must satisfy libmimalloc_sys::mi_is_in_heap_region, with a libc malloc control that must NOT; verified red when the allocator line is removed). Build is Dockerfile on ubuntu:24.04; check mimalloc compiles there.\\n\\nWork, in order — one PR per item is fine:\\n1. mimalloc as global allocator, with a discriminating test like soot's. Then measure: after deploy to staging, compare idle and post-scan RSS vs before (railway metrics -s charcoal-web -e staging --since ... --raw --json). Report the numbers honestly.\\n2. Recommend (do not perform — it's a dashboard/infra action for Bryan) enabling Railway App Sleeping/serverless on staging charcoal-web so idle staging bills ~nothing; note any implication for the in-process admitter/nightly refresh and OAuth on staging.\\n3. Per-phase scan timing baseline: find what charcoal already records (migration 0020_scan_costs, scan phases in src/pipeline/scan_phases/, logs) and produce a breakdown of where wall-clock goes for a few real scans (gather via AppView/Constellation vs ONNX scoring vs DB writes vs RunPod). If instrumentation is missing, add it (tested).\\n4. Only after the baseline: propose and, if justified by the numbers, implement tuning — e.g. ONNX intra-op thread cap per session (ort currently sets none, so each scan grabs all cores), CHARCOAL_BURST_CONCURRENCY (default 16) changes, 429/backoff for the AppView (#182) as a prerequisite for raising request concurrency, raising CHARCOAL_SCAN_CONCURRENCY above 2. Bryan's goal: more concurrent scans and faster scans; Railway Pro gives up to 24+ vCPU per replica.\\n\\nContext: measured from a German Hetzner box vs a US Mac, uncached AppView getAuthorFeed median 0.35s vs 0.24s; public Constellation ~0.25-0.35s/request from both. Scans are documented as mostly fetch-bound (#343 spec: a pool of 4 ONNX sessions gave 0% speedup).\\n\\nReport back with: what shipped (PRs, tests), before/after memory numbers, the per-phase baseline, and tuning recommendations with evidence.\"}"
+    },
+    {
+      "id": 1251,
+      "change_id": "29801eac-7c4f-4ff1-ace9-681623a3da5e",
+      "node_type": "option",
+      "title": "mimalloc global allocator to return post-scan heap (#427)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T16:22:26.076146-08:00",
+      "updated_at": "2026-11-04T16:22:26.076146-08:00",
+      "metadata_json": "{\"branch\":\"sesh/charcoal-railway-cost-scan-tuning\",\"confidence\":75}"
+    },
+    {
+      "id": 1252,
+      "change_id": "47c63067-00e3-4ad8-81fd-06ba55e36c45",
+      "node_type": "option",
+      "title": "Railway App Sleeping on staging (#428, Bryan dashboard action)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T16:22:26.090935-08:00",
+      "updated_at": "2026-11-04T16:22:26.090935-08:00",
+      "metadata_json": "{\"branch\":\"sesh/charcoal-railway-cost-scan-tuning\",\"confidence\":80}"
+    },
+    {
+      "id": 1253,
+      "change_id": "e0a90c59-dc8b-411d-ba7a-95c64d503493",
+      "node_type": "observation",
+      "title": "Staging scan 11-03: mem 0.72->1.74 GB during scan, never returned; prod plateaus 3.8 GB for days until redeploy. Idle floor 0.70 GB (not 1.3)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T16:31:00.986985-08:00",
+      "updated_at": "2026-11-04T16:31:00.986985-08:00",
+      "metadata_json": "{\"branch\":\"sesh/charcoal-railway-cost-scan-tuning\",\"confidence\":95}"
+    },
+    {
+      "id": 1254,
+      "change_id": "2a0ec3f7-bb3c-4e45-9d77-edf4a6746cd7",
+      "node_type": "observation",
+      "title": "Gather is CPU-bound: 19-21 of 24 vCPU during gather; ONNX (Detoxify clean-pass+stage1) = 62-65% of per-account time, fetch 21%. Burst (RunPod) 110-178 s at ~0 CPU",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T16:31:01.012776-08:00",
+      "updated_at": "2026-11-04T16:31:01.012776-08:00",
+      "metadata_json": "{\"branch\":\"sesh/charcoal-railway-cost-scan-tuning\",\"confidence\":90}"
+    },
+    {
+      "id": 1255,
+      "change_id": "33e8cc66-a3d9-4c61-8dfe-be17ccaeb3df",
+      "node_type": "option",
+      "title": "Per-phase baseline from existing #264 timing + phase log lines + 30s railway metrics (#429)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T16:31:04.928286-08:00",
+      "updated_at": "2026-11-04T16:31:04.928286-08:00",
+      "metadata_json": "{\"branch\":\"sesh/charcoal-railway-cost-scan-tuning\",\"confidence\":85}"
+    },
+    {
+      "id": 1256,
+      "change_id": "7f7f50c1-f3c9-4461-87ba-2df9d3208820",
+      "node_type": "decision",
+      "title": "Fix ORT CPU arena retention (arena off + MALLOC_ARENA_MAX=2), NOT mimalloc: probe shows allocator swap alone retains 1532 MB vs ~1500 glibc",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T16:35:06.045753-08:00",
+      "updated_at": "2026-11-04T16:35:06.045753-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"confidence\":85}"
+    },
+    {
+      "id": 1257,
+      "change_id": "6a08e649-6b9a-470f-81a4-8ee17acb748b",
+      "node_type": "action",
+      "title": "ORT arena shrinkage after every run via shared run_options() (#427)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T16:50:13.166807-08:00",
+      "updated_at": "2026-11-04T16:50:13.166807-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"commit\":\"5aedfd4\",\"confidence\":85,\"files\":[\"src/onnx_session.rs\",\"src/toxicity/onnx.rs\",\"src/scoring/nli.rs\",\"src/topics/embeddings.rs\",\"tests/onnx_memory_release.rs\"]}"
+    },
+    {
+      "id": 1258,
+      "change_id": "cf147a6c-8f83-490d-bad0-e93a179687cc",
+      "node_type": "outcome",
+      "title": "Shrinkage fix verified on Linux: toxicity kept 18/1157 MB (red 1127/1127), embeddings 169/1903 (red 1907/2019); +3% time; clippy clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T16:54:29.460328-08:00",
+      "updated_at": "2026-11-04T16:54:29.460328-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"confidence\":90}"
+    },
+    {
+      "id": 1259,
+      "change_id": "bb88c4c1-7c18-441e-b90a-890fccbbc080",
+      "node_type": "outcome",
+      "title": "Baseline: gather CPU-bound (ONNX 62-73%), burst 110-380 s RunPod, finalize 9-104 s; existing instrumentation sufficient",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T16:54:33.922459-08:00",
+      "updated_at": "2026-11-04T16:54:33.922459-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"confidence\":85}"
+    },
+    {
+      "id": 1260,
+      "change_id": "ebdfa26e-d30a-4e97-abaa-00fdae318816",
+      "node_type": "observation",
+      "title": "Throughput plan agreed: merge #427 -> vertical (vCPU + SCAN_CONCURRENCY=3, measure vs zeu.dev) -> replicas only after single-process audit + CHARCOAL_ROLE split",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T17:24:32.903322-08:00",
+      "updated_at": "2026-11-04T17:24:32.903322-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -27798,6 +27941,160 @@
       "weight": 1.0,
       "rationale": "Live run + mutation results",
       "created_at": "2026-11-03T18:01:03.080478-08:00"
+    },
+    {
+      "id": 1300,
+      "from_node_id": 1246,
+      "to_node_id": 1248,
+      "from_change_id": "dc40621f-a38d-4532-b129-89eb63a5bcc7",
+      "to_change_id": "8ac0eeba-709a-4fad-a12b-16c5a9424da1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Unblocks PR #160 out-of-date status",
+      "created_at": "2026-11-03T21:52:17.996091-08:00"
+    },
+    {
+      "id": 1301,
+      "from_node_id": 1246,
+      "to_node_id": 1249,
+      "from_change_id": "dc40621f-a38d-4532-b129-89eb63a5bcc7",
+      "to_change_id": "c1b42c8e-3633-4a52-9941-94ce46782cb5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Promotion result",
+      "created_at": "2026-11-03T22:12:38.321465-08:00"
+    },
+    {
+      "id": 1302,
+      "from_node_id": 1248,
+      "to_node_id": 1249,
+      "from_change_id": "8ac0eeba-709a-4fad-a12b-16c5a9424da1",
+      "to_change_id": "c1b42c8e-3633-4a52-9941-94ce46782cb5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Unblocked the promotion",
+      "created_at": "2026-11-03T22:12:38.329230-08:00"
+    },
+    {
+      "id": 1303,
+      "from_node_id": 1250,
+      "to_node_id": 1251,
+      "from_change_id": "279c85a4-4039-4b20-88e1-362ab97b0fcc",
+      "to_change_id": "29801eac-7c4f-4ff1-ace9-681623a3da5e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "memory drives the bill",
+      "created_at": "2026-11-04T16:22:31.067817-08:00"
+    },
+    {
+      "id": 1304,
+      "from_node_id": 1250,
+      "to_node_id": 1252,
+      "from_change_id": "279c85a4-4039-4b20-88e1-362ab97b0fcc",
+      "to_change_id": "47c63067-00e3-4ad8-81fd-06ba55e36c45",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "idle staging bills 24/7",
+      "created_at": "2026-11-04T16:22:31.074801-08:00"
+    },
+    {
+      "id": 1305,
+      "from_node_id": 1251,
+      "to_node_id": 1253,
+      "from_change_id": "29801eac-7c4f-4ff1-ace9-681623a3da5e",
+      "to_change_id": "e0a90c59-dc8b-411d-ba7a-95c64d503493",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "evidence for heap retention",
+      "created_at": "2026-11-04T16:31:04.896450-08:00"
+    },
+    {
+      "id": 1306,
+      "from_node_id": 1250,
+      "to_node_id": 1255,
+      "from_change_id": "279c85a4-4039-4b20-88e1-362ab97b0fcc",
+      "to_change_id": "33e8cc66-a3d9-4c61-8dfe-be17ccaeb3df",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "item 3",
+      "created_at": "2026-11-04T16:31:10.151391-08:00"
+    },
+    {
+      "id": 1307,
+      "from_node_id": 1255,
+      "to_node_id": 1254,
+      "from_change_id": "33e8cc66-a3d9-4c61-8dfe-be17ccaeb3df",
+      "to_change_id": "2a0ec3f7-bb3c-4e45-9d77-edf4a6746cd7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "baseline finding",
+      "created_at": "2026-11-04T16:31:10.173795-08:00"
+    },
+    {
+      "id": 1308,
+      "from_node_id": 1251,
+      "to_node_id": 1256,
+      "from_change_id": "29801eac-7c4f-4ff1-ace9-681623a3da5e",
+      "to_change_id": "7f7f50c1-f3c9-4461-87ba-2df9d3208820",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option evaluated; probe redirected it",
+      "created_at": "2026-11-04T16:35:21.607989-08:00"
+    },
+    {
+      "id": 1309,
+      "from_node_id": 1253,
+      "to_node_id": 1256,
+      "from_change_id": "e0a90c59-dc8b-411d-ba7a-95c64d503493",
+      "to_change_id": "7f7f50c1-f3c9-4461-87ba-2df9d3208820",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "evidence",
+      "created_at": "2026-11-04T16:35:21.615739-08:00"
+    },
+    {
+      "id": 1310,
+      "from_node_id": 1256,
+      "to_node_id": 1257,
+      "from_change_id": "7f7f50c1-f3c9-4461-87ba-2df9d3208820",
+      "to_change_id": "6a08e649-6b9a-470f-81a4-8ee17acb748b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implements decision (revised to shrinkage after round-3 probe)",
+      "created_at": "2026-11-04T16:50:19.128577-08:00"
+    },
+    {
+      "id": 1311,
+      "from_node_id": 1257,
+      "to_node_id": 1258,
+      "from_change_id": "6a08e649-6b9a-470f-81a4-8ee17acb748b",
+      "to_change_id": "cf147a6c-8f83-490d-bad0-e93a179687cc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result",
+      "created_at": "2026-11-04T16:54:33.903865-08:00"
+    },
+    {
+      "id": 1312,
+      "from_node_id": 1255,
+      "to_node_id": 1259,
+      "from_change_id": "33e8cc66-a3d9-4c61-8dfe-be17ccaeb3df",
+      "to_change_id": "bb88c4c1-7c18-441e-b90a-890fccbbc080",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "baseline result",
+      "created_at": "2026-11-04T16:54:40.179999-08:00"
+    },
+    {
+      "id": 1313,
+      "from_node_id": 1250,
+      "to_node_id": 1260,
+      "from_change_id": "279c85a4-4039-4b20-88e1-362ab97b0fcc",
+      "to_change_id": "ebdfa26e-d30a-4e97-abaa-00fdae318816",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "agreed next steps for throughput",
+      "created_at": "2026-11-04T17:24:36.923869-08:00"
     }
   ],
   "documents": [

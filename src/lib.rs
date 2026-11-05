@@ -10,6 +10,7 @@ pub mod constellation;
 pub mod db;
 pub mod discovery;
 pub mod observability;
+pub mod onnx_session;
 pub mod output;
 pub mod pipeline;
 pub mod scoring;

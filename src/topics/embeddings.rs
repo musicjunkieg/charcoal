@@ -172,16 +172,21 @@ fn embed_sync(
 
     // Run inference — output is last_hidden_state: [batch, seq_len, 384]
     let hidden_states = {
+        let run_options =
+            crate::onnx_session::run_options().context("Failed to create ONNX run options")?;
         let mut session = session
             .lock()
             .map_err(|e| anyhow::anyhow!("Session lock poisoned: {}", e))?;
 
         let outputs = session
-            .run(ort::inputs! {
-                "input_ids" => input_ids_tensor,
-                "attention_mask" => attention_mask_tensor,
-                "token_type_ids" => token_type_ids_tensor
-            })
+            .run_with_options(
+                ort::inputs! {
+                    "input_ids" => input_ids_tensor,
+                    "attention_mask" => attention_mask_tensor,
+                    "token_type_ids" => token_type_ids_tensor
+                },
+                &run_options,
+            )
             .context("Embedding ONNX inference failed")?;
 
         let (_shape, data) = outputs[0]
