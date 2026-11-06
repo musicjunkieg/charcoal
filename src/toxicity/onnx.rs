@@ -282,15 +282,20 @@ impl ToxicityScorer for OnnxToxicityScorer {
                 .context("Failed to create attention_mask tensor")?;
 
             let logits_data = {
+                let run_options = crate::onnx_session::run_options()
+                    .context("Failed to create ONNX run options")?;
                 let mut session = session
                     .lock()
                     .map_err(|e| anyhow::anyhow!("Session lock poisoned: {}", e))?;
 
                 let outputs = session
-                    .run(ort::inputs! {
-                        "input_ids" => input_ids_tensor,
-                        "attention_mask" => attention_mask_tensor
-                    })
+                    .run_with_options(
+                        ort::inputs! {
+                            "input_ids" => input_ids_tensor,
+                            "attention_mask" => attention_mask_tensor
+                        },
+                        &run_options,
+                    )
                     .context("ONNX inference failed")?;
 
                 // Output shape: [batch_size, 16] — raw logits (pre-sigmoid).

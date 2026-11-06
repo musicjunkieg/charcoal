@@ -1,5 +1,37 @@
 [
   {
+    "hash": "5c7b3970871abfa1f9726ca235bf0e6f8bbed164",
+    "short_hash": "5c7b397",
+    "author": "Bryan Guffey",
+    "date": "2026-11-04T17:25:49-08:00",
+    "message": "fix(427): shrink the ONNX CPU arena after every inference run\n\nThe arena kept each scan peak until redeploy (prod 3.8 GB). Linux probe: held 1416 -> ~270 MB at +3% time; arena-off was 35-45% slower and mimalloc did nothing.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "files_changed": 9
+  },
+  {
+    "hash": "82b1f9aed792a227901603bf4b9223f0bccedee6",
+    "short_hash": "82b1f9a",
+    "author": "Bryan Guffey",
+    "date": "2026-11-03T22:06:54-08:00",
+    "message": "Merge pull request #160 from musicjunkieg/staging\n\nchore(release): promote staging to main (#423 single cold boot, #420 tooling, #419 rules)",
+    "files_changed": 0
+  },
+  {
+    "hash": "5aedfd4dd75d1f7f626b319edab482a7b1440f5f",
+    "short_hash": "5aedfd4",
+    "author": "Bryan Guffey",
+    "date": "2026-11-03T21:59:03-08:00",
+    "message": "Merge pull request #163 from musicjunkieg/chore/sync-main-into-staging\n\nchore: sync main history into staging (no file changes)",
+    "files_changed": 0
+  },
+  {
+    "hash": "3bc78369eb533f2d80dfcbc292c91099d36becc0",
+    "short_hash": "3bc7836",
+    "author": "Bryan Guffey",
+    "date": "2026-11-03T21:51:53-08:00",
+    "message": "Merge branch 'main' of github.com:musicjunkieg/charcoal into chore/sync-main-into-staging",
+    "files_changed": 0
+  },
+  {
     "hash": "fe599738273ac604db8af196646e2315860b6cad",
     "short_hash": "fe59973",
     "author": "Bryan Guffey",
