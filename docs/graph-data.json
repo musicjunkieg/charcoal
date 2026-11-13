@@ -13881,6 +13881,17 @@
       "created_at": "2026-11-12T18:12:11.122248-08:00",
       "updated_at": "2026-11-12T18:12:11.122248-08:00",
       "metadata_json": "{\"branch\":\"chore/sync-main-into-staging\",\"commit\":\"3a50f4a\",\"confidence\":90}"
+    },
+    {
+      "id": 1272,
+      "change_id": "1a66f95f-a09a-4b30-8e8e-722b34b0c7cd",
+      "node_type": "action",
+      "title": "Fix CodeRabbit findings on #166: serve reads PORT, sessionSetup keeps .env 0600",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-12T19:34:06.110647-08:00",
+      "updated_at": "2026-11-12T19:34:06.110647-08:00",
+      "metadata_json": "{\"branch\":\"chore/432-sesh-config\",\"commit\":\"541424a\",\"confidence\":90,\"files\":[\"src/main.rs\",\"Cargo.toml\",\".sesh/config.json\"]}"
     }
   ],
   "edges": [
@@ -28326,6 +28337,17 @@
       "weight": 1.0,
       "rationale": "verification of the config",
       "created_at": "2026-11-12T18:12:16.497519-08:00"
+    },
+    {
+      "id": 1324,
+      "from_node_id": 1271,
+      "to_node_id": 1272,
+      "from_change_id": "62c8f4cb-ae6d-4334-a83b-8c2e3f6242a4",
+      "to_change_id": "1a66f95f-a09a-4b30-8e8e-722b34b0c7cd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review found the port claim was false",
+      "created_at": "2026-11-12T19:34:06.134406-08:00"
     }
   ],
   "documents": [
