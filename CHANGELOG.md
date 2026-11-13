@@ -40,6 +40,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   run refuses to start without `CHARCOAL_COPE_B_POLICY_VERSION`.
 
 ### Changed
+- #427 — the web server gives back the memory a scan used. ONNX Runtime's
+  CPU memory arena grew to fit the biggest batch it had ever scored and never
+  shrank, so after one scan the server held that peak until the next deploy
+  (staging 0.72 → 1.74 GB after a single scan; prod 3.8 GB for days). Railway
+  bills memory held, so this was most of the monthly bill. Every inference
+  call (toxicity, embeddings, NLI) now asks ONNX Runtime to shrink the arena
+  when the call ends. Measured on Linux with the toxicity model: memory held
+  after the work fell from ~1.4 GB to ~0.27 GB, and the same work took ~3%
+  longer. Turning the arena off entirely also freed the memory but made
+  inference 35–45% slower, and swapping in mimalloc changed nothing while the
+  arena was holding the memory, so neither was used.
 - #423 — a full scan no longer checks the GPU endpoint's identity before it
   gathers. That check woke a worker which idled out during the gather, so the
   classification burst paid a second cold boot (~$0.30 per scan on the

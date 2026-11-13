@@ -153,7 +153,10 @@ enum Commands {
     #[cfg(feature = "web")]
     Serve {
         /// Port to listen on (default: 3000, or $PORT env var)
-        #[arg(long, default_value = "3000")]
+        // `env` makes the doc line above true: it never was, so every Sesh
+        // session (each given its own PORT) bound 3000. `--port` still wins,
+        // which keeps the Dockerfile's explicit `--port ${PORT:-3000}` as is.
+        #[arg(long, env = "PORT", default_value = "3000")]
         port: u16,
         /// Address to bind
         #[arg(long, default_value = "0.0.0.0")]
@@ -1753,4 +1756,30 @@ async fn fetch_constellation_events(
     events.retain(|e| seen.insert(e.amplifier_post_uri.clone()));
 
     Ok(events)
+}
+
+// Gated on `web` with the test: `serve` only exists in the web build.
+#[cfg(all(test, feature = "web"))]
+mod tests {
+    use super::Cli;
+    use clap::CommandFactory;
+
+    // Requirement: `charcoal serve` with no `--port` must listen on $PORT when
+    // it is set. Sesh gives each session its own port through PORT (written
+    // into .env, which dotenvy loads before the arguments are parsed), so two
+    // sessions only avoid fighting over 3000 if the argument reads it.
+    // Checked on the parser definition rather than by setting PORT, because
+    // changing the process environment races with every other test thread.
+    #[test]
+    fn serve_port_falls_back_to_port_env_var() {
+        let cmd = Cli::command();
+        let serve = cmd
+            .find_subcommand("serve")
+            .expect("serve subcommand exists");
+        let port = serve
+            .get_arguments()
+            .find(|a| a.get_id() == "port")
+            .expect("serve has a port argument");
+        assert_eq!(port.get_env(), Some(std::ffi::OsStr::new("PORT")));
+    }
 }

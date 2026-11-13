@@ -220,6 +220,8 @@ impl NliScorer {
                 .context("Failed to create attention_mask")?;
 
             let logits_data = {
+                let run_options = crate::onnx_session::run_options()
+                    .context("Failed to create ONNX run options")?;
                 let mut session = session
                     .lock()
                     .map_err(|e| anyhow::anyhow!("NLI session lock poisoned: {}", e))?;
@@ -230,10 +232,13 @@ impl NliScorer {
                 // return an error, so we only send the two known inputs. The
                 // batch axis IS dynamic (verified before building #213).
                 let outputs = session
-                    .run(ort::inputs! {
-                        "input_ids" => input_ids_tensor,
-                        "attention_mask" => attention_mask_tensor
-                    })
+                    .run_with_options(
+                        ort::inputs! {
+                            "input_ids" => input_ids_tensor,
+                            "attention_mask" => attention_mask_tensor
+                        },
+                        &run_options,
+                    )
                     .context("NLI ONNX inference failed")?;
 
                 // Output: [batch, 3] — per row [contradiction, entailment, neutral].
