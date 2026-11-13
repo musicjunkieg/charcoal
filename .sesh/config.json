@@ -2,5 +2,5 @@
   "setup": "primary=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")\" && mkdir -p .chainlink .deciduous && ln -sfn \"$primary/.chainlink/issues.db\" .chainlink/issues.db && ln -sfn \"$primary/.deciduous/deciduous.db\" .deciduous/deciduous.db && ln -sfn \"$primary/.deciduous/config.toml\" .deciduous/config.toml && ln -sfn \"$primary/models\" models && cargo fetch -q && npm --prefix web ci --no-audit --no-fund && npm --prefix web run build",
   "copy": [".env", ".claude/settings.local.json"],
   "ports": 1,
-  "sessionSetup": "touch .env && grep -v '^PORT=' .env > .env.sesh; echo \"PORT=$SESH_SESSION_PORT\" >> .env.sesh && mv .env.sesh .env"
+  "sessionSetup": "umask 077 && touch .env && rm -f .env.sesh && grep -v '^PORT=' .env > .env.sesh; echo \"PORT=$SESH_SESSION_PORT\" >> .env.sesh && mv .env.sesh .env"
 }

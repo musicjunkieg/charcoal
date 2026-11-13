@@ -6,7 +6,7 @@ description = "Predictive threat detection for Bluesky"
 
 [dependencies]
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # Async runtime (required by bsky-sdk)
 tokio = { version = "1", features = ["full"] }
