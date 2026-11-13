@@ -13771,6 +13771,138 @@
       "created_at": "2026-11-04T17:28:44.365242-08:00",
       "updated_at": "2026-11-04T17:28:44.365242-08:00",
       "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"commit\":\"5c7b397\",\"confidence\":90}"
+    },
+    {
+      "id": 1262,
+      "change_id": "70bdb524-01b4-4b0d-b43e-68c1263f5553",
+      "node_type": "action",
+      "title": "Address CodeRabbit review on PR #164: model-dir gate fails on explicit missing models",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T18:48:00.872559-08:00",
+      "updated_at": "2026-11-04T18:48:00.872559-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"commit\":\"cca4a27\",\"confidence\":90,\"files\":[\"tests/onnx_memory_release.rs\"]}"
+    },
+    {
+      "id": 1263,
+      "change_id": "68f6ca45-41bc-4ab2-961a-bbbdc05143d2",
+      "node_type": "outcome",
+      "title": "PR #164 merge-ready: CodeRabbit approved, CI green, memory tests ran (0 skips)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T19:09:19.179184-08:00",
+      "updated_at": "2026-11-04T19:09:19.179184-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"commit\":\"cca4a27\",\"confidence\":95}"
+    },
+    {
+      "id": 1264,
+      "change_id": "7567782c-119b-4219-bf28-7966a10ed9ee",
+      "node_type": "outcome",
+      "title": "PR #164 merged to staging (9acf8dc); deploy f6f41b10",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-04T19:24:07.111837-08:00",
+      "updated_at": "2026-11-04T19:24:07.111837-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"commit\":\"9acf8dc\",\"confidence\":95}"
+    },
+    {
+      "id": 1265,
+      "change_id": "8a4e4951-8cb0-497f-bb72-d8333230e248",
+      "node_type": "outcome",
+      "title": "Live staging: scan peak 1.54 GB (VmHWM), returned 0.61 of 0.82 GB added (74%); pre-fix returned 0",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-05T18:42:34.181740-08:00",
+      "updated_at": "2026-11-05T18:42:34.181740-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"commit\":\"9acf8dc\",\"confidence\":90}"
+    },
+    {
+      "id": 1266,
+      "change_id": "dd61c09a-2f0c-414e-ba29-3dc31d0c9da4",
+      "node_type": "action",
+      "title": "Open promotion PR #165 staging->main for #427",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-05T18:51:40.726875-08:00",
+      "updated_at": "2026-11-05T18:51:40.726875-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"commit\":\"9acf8dc\",\"confidence\":90}"
+    },
+    {
+      "id": 1267,
+      "change_id": "64ec1e1e-ab0d-4895-9bea-781ce2931142",
+      "node_type": "outcome",
+      "title": "PR #165 merge-ready: CodeRabbit approved, own CI run green",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-05T19:00:22.557109-08:00",
+      "updated_at": "2026-11-05T19:00:22.557109-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"commit\":\"9acf8dc\",\"confidence\":95}"
+    },
+    {
+      "id": 1268,
+      "change_id": "9a99d9e4-70bc-41c9-a450-615ab195ddc5",
+      "node_type": "outcome",
+      "title": "Prod full scan chaosgreml.in 2026-11-07 9:26 AM PT: 1071 cls billed $0.319 by RunPod (only GPU use that hour); fits estimate 27-43c; vs $0.74 pre-#423",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-07T17:15:25.546936-08:00",
+      "updated_at": "2026-11-07T17:15:25.546936-08:00",
+      "metadata_json": "{\"branch\":\"chore/sync-main-into-staging\",\"commit\":\"82b1f9a\",\"confidence\":95}"
+    },
+    {
+      "id": 1269,
+      "change_id": "4cf2c15a-0c01-4fc9-9e83-b3e7175a1dbc",
+      "node_type": "observation",
+      "title": "soot /export contract for SootSource (343 s4.5): non-200 incl 422 tie_group_too_large -> Bluesky fallback; NDJSON + required trailer; dedicated token; tailnet bridge",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-08T09:43:19.865835-08:00",
+      "updated_at": "2026-11-08T09:43:19.865835-08:00",
+      "metadata_json": "{\"branch\":\"feat/427-mimalloc\",\"confidence\":85}"
+    },
+    {
+      "id": 1270,
+      "change_id": "b54edd4f-f577-4a51-abf3-3fed1f618728",
+      "node_type": "action",
+      "title": "Add Sesh worktree config (.sesh/config.json)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-12T18:12:11.104761-08:00",
+      "updated_at": "2026-11-12T18:12:11.104761-08:00",
+      "metadata_json": "{\"branch\":\"chore/sync-main-into-staging\",\"commit\":\"3a50f4a\",\"confidence\":90,\"files\":[\".sesh/config.json\"]}"
+    },
+    {
+      "id": 1271,
+      "change_id": "62c8f4cb-ae6d-4334-a83b-8c2e3f6242a4",
+      "node_type": "outcome",
+      "title": "Sesh config verified in scratch worktree: setup 6s, symlinks resolve, chainlink works, git status clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-12T18:12:11.122248-08:00",
+      "updated_at": "2026-11-12T18:12:11.122248-08:00",
+      "metadata_json": "{\"branch\":\"chore/sync-main-into-staging\",\"commit\":\"3a50f4a\",\"confidence\":90}"
+    },
+    {
+      "id": 1272,
+      "change_id": "1a66f95f-a09a-4b30-8e8e-722b34b0c7cd",
+      "node_type": "action",
+      "title": "Fix CodeRabbit findings on #166: serve reads PORT, sessionSetup keeps .env 0600",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-12T19:34:06.110647-08:00",
+      "updated_at": "2026-11-12T19:34:06.110647-08:00",
+      "metadata_json": "{\"branch\":\"chore/432-sesh-config\",\"commit\":\"541424a\",\"confidence\":90,\"files\":[\"src/main.rs\",\"Cargo.toml\",\".sesh/config.json\"]}"
+    },
+    {
+      "id": 1273,
+      "change_id": "53dcc42e-cdb3-48cc-9d03-4bcef3c9a58e",
+      "node_type": "action",
+      "title": "Chain sessionSetup so a failed .env read never replaces .env",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-12T19:44:36.795897-08:00",
+      "updated_at": "2026-11-12T19:44:36.795897-08:00",
+      "metadata_json": "{\"branch\":\"chore/432-sesh-config\",\"commit\":\"7557204\",\"confidence\":90,\"files\":[\".sesh/config.json\"]}"
     }
   ],
   "edges": [
@@ -28117,6 +28249,127 @@
       "weight": 1.0,
       "rationale": "verified fix submitted for review",
       "created_at": "2026-11-04T17:28:47.806292-08:00"
+    },
+    {
+      "id": 1315,
+      "from_node_id": 1261,
+      "to_node_id": 1262,
+      "from_change_id": "92512aee-e1f6-42e5-a829-4c025e379b2c",
+      "to_change_id": "70bdb524-01b4-4b0d-b43e-68c1263f5553",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review follow-up",
+      "created_at": "2026-11-04T18:48:04.116673-08:00"
+    },
+    {
+      "id": 1316,
+      "from_node_id": 1262,
+      "to_node_id": 1263,
+      "from_change_id": "70bdb524-01b4-4b0d-b43e-68c1263f5553",
+      "to_change_id": "68f6ca45-41bc-4ab2-961a-bbbdc05143d2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review loop complete",
+      "created_at": "2026-11-04T19:09:24.722050-08:00"
+    },
+    {
+      "id": 1317,
+      "from_node_id": 1263,
+      "to_node_id": 1264,
+      "from_change_id": "68f6ca45-41bc-4ab2-961a-bbbdc05143d2",
+      "to_change_id": "7567782c-119b-4219-bf28-7966a10ed9ee",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "merged",
+      "created_at": "2026-11-04T19:24:10.830981-08:00"
+    },
+    {
+      "id": 1318,
+      "from_node_id": 1264,
+      "to_node_id": 1265,
+      "from_change_id": "7567782c-119b-4219-bf28-7966a10ed9ee",
+      "to_change_id": "8a4e4951-8cb0-497f-bb72-d8333230e248",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "live verification",
+      "created_at": "2026-11-05T18:42:41.738777-08:00"
+    },
+    {
+      "id": 1319,
+      "from_node_id": 1265,
+      "to_node_id": 1266,
+      "from_change_id": "8a4e4951-8cb0-497f-bb72-d8333230e248",
+      "to_change_id": "dd61c09a-2f0c-414e-ba29-3dc31d0c9da4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "verified on staging -> promote",
+      "created_at": "2026-11-05T18:51:44.350197-08:00"
+    },
+    {
+      "id": 1320,
+      "from_node_id": 1266,
+      "to_node_id": 1267,
+      "from_change_id": "dd61c09a-2f0c-414e-ba29-3dc31d0c9da4",
+      "to_change_id": "64ec1e1e-ab0d-4895-9bea-781ce2931142",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "ready",
+      "created_at": "2026-11-05T19:00:38.152195-08:00"
+    },
+    {
+      "id": 1321,
+      "from_node_id": 1249,
+      "to_node_id": 1268,
+      "from_change_id": "c1b42c8e-3633-4a52-9941-94ce46782cb5",
+      "to_change_id": "9a99d9e4-70bc-41c9-a450-615ab195ddc5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Live verification of the promoted fix",
+      "created_at": "2026-11-07T17:15:28.547640-08:00"
+    },
+    {
+      "id": 1322,
+      "from_node_id": 773,
+      "to_node_id": 1269,
+      "from_change_id": "eebdf6b0-0878-41e6-bd67-f57502e0dd6c",
+      "to_change_id": "4cf2c15a-0c01-4fc9-9e83-b3e7175a1dbc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "client contract for 4.5 SootSource",
+      "created_at": "2026-11-08T09:43:27.588453-08:00"
+    },
+    {
+      "id": 1323,
+      "from_node_id": 1270,
+      "to_node_id": 1271,
+      "from_change_id": "b54edd4f-f577-4a51-abf3-3fed1f618728",
+      "to_change_id": "62c8f4cb-ae6d-4334-a83b-8c2e3f6242a4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "verification of the config",
+      "created_at": "2026-11-12T18:12:16.497519-08:00"
+    },
+    {
+      "id": 1324,
+      "from_node_id": 1271,
+      "to_node_id": 1272,
+      "from_change_id": "62c8f4cb-ae6d-4334-a83b-8c2e3f6242a4",
+      "to_change_id": "1a66f95f-a09a-4b30-8e8e-722b34b0c7cd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review found the port claim was false",
+      "created_at": "2026-11-12T19:34:06.134406-08:00"
+    },
+    {
+      "id": 1325,
+      "from_node_id": 1272,
+      "to_node_id": 1273,
+      "from_change_id": "1a66f95f-a09a-4b30-8e8e-722b34b0c7cd",
+      "to_change_id": "53dcc42e-cdb3-48cc-9d03-4bcef3c9a58e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "second CodeRabbit pass on the same fix",
+      "created_at": "2026-11-12T19:44:42.156964-08:00"
     }
   ],
   "documents": [
