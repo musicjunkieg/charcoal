@@ -51,6 +51,14 @@ jobs:
         # branch name can never be injected into the shell.
         run: echo "value=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
 
+      - name: Derive image owner
+        id: owner
+        # Image names must be lowercase, and the repo owner is not: it moved
+        # from musicjunkieg to Work-Right (2026-11-12), and "Work-Right" in a
+        # tag makes every push fail. Read the built-in env var for the same
+        # no-injection reason as the step above.
+        run: echo "value=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -58,8 +66,8 @@ jobs:
           file: ./gpu/cope-b-runpod/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ steps.reftag.outputs.value }}
+            ghcr.io/${{ steps.owner.outputs.value }}/charcoal-cope-b:${{ github.sha }}
+            ghcr.io/${{ steps.owner.outputs.value }}/charcoal-cope-b:${{ steps.reftag.outputs.value }}
           build-args: |
             POLICY_VERSION=${{ steps.policyver.outputs.value }}
           # Weights are not in the image (network-volume mounted at runtime), so
@@ -70,6 +78,6 @@ jobs:
 
       - name: Summary
         run: |
-          echo "Built ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "Built ghcr.io/${{ steps.owner.outputs.value }}/charcoal-cope-b:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "Policy version: ${{ steps.policyver.outputs.value }}" >> $GITHUB_STEP_SUMMARY
           echo "Next: update RunPod endpoint to use this image digest." >> $GITHUB_STEP_SUMMARY
