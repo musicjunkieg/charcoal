@@ -69,7 +69,7 @@ from typing import Iterable, Optional
 
 API_BASE = "https://public.api.bsky.app"
 CONSTELLATION_BASE = "https://constellation.microcosm.blue"
-USER_AGENT = "charcoal-fixture-finder/0.1 (+https://github.com/musicjunkieg/charcoal)"
+USER_AGENT = "charcoal-fixture-finder/0.1 (+https://github.com/Work-Right/charcoal)"
 
 # Constellation source identifier — `collection:json_path` (no leading dot).
 # See src/constellation/client.rs in this repo for the canonical shape.

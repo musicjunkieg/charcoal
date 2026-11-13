@@ -13903,6 +13903,17 @@
       "created_at": "2026-11-12T19:44:36.795897-08:00",
       "updated_at": "2026-11-12T19:44:36.795897-08:00",
       "metadata_json": "{\"branch\":\"chore/432-sesh-config\",\"commit\":\"7557204\",\"confidence\":90,\"files\":[\".sesh/config.json\"]}"
+    },
+    {
+      "id": 1274,
+      "change_id": "f8d24e46-ba85-4d6a-82d7-781d95ad710d",
+      "node_type": "action",
+      "title": "sessionSetup writes PORT first (dotenvy first-wins) and filters export/spaced PORT",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-12T19:59:11.719005-08:00",
+      "updated_at": "2026-11-12T19:59:11.719005-08:00",
+      "metadata_json": "{\"branch\":\"chore/432-sesh-config\",\"commit\":\"e8f9740\",\"confidence\":90,\"files\":[\".sesh/config.json\"]}"
     }
   ],
   "edges": [
@@ -28370,6 +28381,17 @@
       "weight": 1.0,
       "rationale": "second CodeRabbit pass on the same fix",
       "created_at": "2026-11-12T19:44:42.156964-08:00"
+    },
+    {
+      "id": 1326,
+      "from_node_id": 1273,
+      "to_node_id": 1274,
+      "from_change_id": "53dcc42e-cdb3-48cc-9d03-4bcef3c9a58e",
+      "to_change_id": "f8d24e46-ba85-4d6a-82d7-781d95ad710d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "third CodeRabbit pass",
+      "created_at": "2026-11-12T19:59:20.536546-08:00"
     }
   ],
   "documents": [

@@ -26,7 +26,7 @@ each score), so you can review and decide what action to take.
 ### 1. Build
 
 ```bash
-git clone https://github.com/musicjunkieg/charcoal.git
+git clone https://github.com/Work-Right/charcoal.git
 cd charcoal
 cargo build --release
 ```
