@@ -45,7 +45,14 @@ Order of operations (one-time):
 1. **Build + publish the image.** `.github/workflows/build-cope-b-image.yml`
    builds on pushes to `staging`/`main` (and, temporarily, the feature branch)
    touching `gpu/cope-b-runpod/**`, publishing
-   `ghcr.io/musicjunkieg/charcoal-cope-b:<sha>` (and a slugified branch tag).
+   `ghcr.io/<repo owner>/charcoal-cope-b:<sha>` (and a slugified branch tag).
+   The owner comes from `github.repository_owner`, so since the repo moved to
+   the Work-Right org (2026-11-12) new builds publish to
+   `ghcr.io/work-right/charcoal-cope-b`. Every image built before the move,
+   including the one the RunPod endpoint runs today, stays at
+   `ghcr.io/musicjunkieg/charcoal-cope-b`. After the next rebuild, point the
+   endpoint at the new path, and give RunPod a registry credential for it if
+   the package is private.
    The image is small now (no weights), so it builds on a stock runner.
 
 2. **Create the network volume** in a data center that has A100 80GB stock,
