@@ -553,7 +553,14 @@ def mark_full_guard_sent(chainlink_dir):
 
 
 def load_tracking_mode(chainlink_dir):
-    """Read tracking_mode from .chainlink/hook-config.json. Defaults to 'strict'."""
+    """Read tracking_mode from .chainlink/hook-config.json. Defaults to 'strict'.
+
+    Always 'relaxed' in a claude.ai cloud session (CLAUDE_CODE_REMOTE=true),
+    matching work-check.py: the sandbox tracker is a throwaway copy, so
+    don't tell the agent to create issues there.
+    """
+    if os.environ.get("CLAUDE_CODE_REMOTE") == "true":
+        return "relaxed"
     if not chainlink_dir:
         return "strict"
     config_path = os.path.join(chainlink_dir, "hook-config.json")

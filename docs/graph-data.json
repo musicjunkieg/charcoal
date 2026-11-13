@@ -13903,6 +13903,72 @@
       "created_at": "2026-11-12T19:44:36.795897-08:00",
       "updated_at": "2026-11-12T19:44:36.795897-08:00",
       "metadata_json": "{\"branch\":\"chore/432-sesh-config\",\"commit\":\"7557204\",\"confidence\":90,\"files\":[\".sesh/config.json\"]}"
+    },
+    {
+      "id": 1274,
+      "change_id": "f8d24e46-ba85-4d6a-82d7-781d95ad710d",
+      "node_type": "action",
+      "title": "sessionSetup writes PORT first (dotenvy first-wins) and filters export/spaced PORT",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-12T19:59:11.719005-08:00",
+      "updated_at": "2026-11-12T19:59:11.719005-08:00",
+      "metadata_json": "{\"branch\":\"chore/432-sesh-config\",\"commit\":\"e8f9740\",\"confidence\":90,\"files\":[\".sesh/config.json\"]}"
+    },
+    {
+      "id": 1275,
+      "change_id": "2b91c2c2-43a1-4e7b-9749-a6ab978cdbe1",
+      "node_type": "goal",
+      "title": "Sync charcoal from project-template (2026-11)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-12T23:42:59.610611-08:00",
+      "updated_at": "2026-11-12T23:42:59.610611-08:00",
+      "metadata_json": "{\"branch\":\"sesh/template-sync-charcoal\",\"confidence\":90,\"prompt\":\"Sync this project from project-template, open a PR, get it review-clean, and report back. Don't merge; Bryan merges. (Dispatched by the Set Up project-template Sesh session; full brief in session c9b9bfc5.)\"}"
+    },
+    {
+      "id": 1276,
+      "change_id": "0df12ffc-ee28-40bc-818a-87c3b8c9b5e6",
+      "node_type": "option",
+      "title": "Take template install-hooks.sh verbatim (brief says template covers all local blocks)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-12T23:43:03.910884-08:00",
+      "updated_at": "2026-11-12T23:43:03.910884-08:00",
+      "metadata_json": "{\"branch\":\"sesh/template-sync-charcoal\",\"confidence\":40}"
+    },
+    {
+      "id": 1277,
+      "change_id": "9609f2c8-8765-4241-af21-302e4d9fd700",
+      "node_type": "option",
+      "title": "Take template install-hooks.sh, re-port the #367 affected-tests pre-push gate; use .hookenv for CHARCOAL_MODEL_DIR",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-12T23:43:03.927480-08:00",
+      "updated_at": "2026-11-12T23:43:03.927480-08:00",
+      "metadata_json": "{\"branch\":\"sesh/template-sync-charcoal\",\"confidence\":90}"
+    },
+    {
+      "id": 1278,
+      "change_id": "ee94ca29-f30c-44a7-8c89-0f1d271b8905",
+      "node_type": "decision",
+      "title": "Re-port #367 pre-push gate: template pre-push runs full cargo test without --features web",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-12T23:43:07.640369-08:00",
+      "updated_at": "2026-11-12T23:43:07.640369-08:00",
+      "metadata_json": "{\"branch\":\"sesh/template-sync-charcoal\",\"confidence\":90}"
+    },
+    {
+      "id": 1279,
+      "change_id": "f5fc948c-82fc-40d8-870f-7e9e06b124fd",
+      "node_type": "action",
+      "title": "Apply template sync; re-port #367 gate; keep .sesh config +.hookenv; keep linguist attrs",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-12T23:43:12.116036-08:00",
+      "updated_at": "2026-11-12T23:43:12.116036-08:00",
+      "metadata_json": "{\"branch\":\"sesh/template-sync-charcoal\",\"commit\":\"3119f9b\",\"confidence\":85,\"files\":[\"scripts/install-hooks.sh\",\".gitattributes\",\".sesh/config.json\",\"CLAUDE.md\",\"README.md\"]}"
     }
   ],
   "edges": [
@@ -28370,6 +28436,72 @@
       "weight": 1.0,
       "rationale": "second CodeRabbit pass on the same fix",
       "created_at": "2026-11-12T19:44:42.156964-08:00"
+    },
+    {
+      "id": 1326,
+      "from_node_id": 1273,
+      "to_node_id": 1274,
+      "from_change_id": "53dcc42e-cdb3-48cc-9d03-4bcef3c9a58e",
+      "to_change_id": "f8d24e46-ba85-4d6a-82d7-781d95ad710d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "third CodeRabbit pass",
+      "created_at": "2026-11-12T19:59:20.536546-08:00"
+    },
+    {
+      "id": 1327,
+      "from_node_id": 1275,
+      "to_node_id": 1276,
+      "from_change_id": "2b91c2c2-43a1-4e7b-9749-a6ab978cdbe1",
+      "to_change_id": "0df12ffc-ee28-40bc-818a-87c3b8c9b5e6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "possible approach",
+      "created_at": "2026-11-12T23:43:07.655138-08:00"
+    },
+    {
+      "id": 1328,
+      "from_node_id": 1275,
+      "to_node_id": 1277,
+      "from_change_id": "2b91c2c2-43a1-4e7b-9749-a6ab978cdbe1",
+      "to_change_id": "9609f2c8-8765-4241-af21-302e4d9fd700",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "possible approach",
+      "created_at": "2026-11-12T23:43:07.666067-08:00"
+    },
+    {
+      "id": 1329,
+      "from_node_id": 1277,
+      "to_node_id": 1278,
+      "from_change_id": "9609f2c8-8765-4241-af21-302e4d9fd700",
+      "to_change_id": "ee94ca29-f30c-44a7-8c89-0f1d271b8905",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen: template does not cover affected-test selection",
+      "created_at": "2026-11-12T23:43:12.075202-08:00"
+    },
+    {
+      "id": 1330,
+      "from_node_id": 1276,
+      "to_node_id": 1278,
+      "from_change_id": "0df12ffc-ee28-40bc-818a-87c3b8c9b5e6",
+      "to_change_id": "ee94ca29-f30c-44a7-8c89-0f1d271b8905",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected: regresses #367, full suite on every push",
+      "created_at": "2026-11-12T23:43:12.083779-08:00"
+    },
+    {
+      "id": 1331,
+      "from_node_id": 1278,
+      "to_node_id": 1279,
+      "from_change_id": "ee94ca29-f30c-44a7-8c89-0f1d271b8905",
+      "to_change_id": "f5fc948c-82fc-40d8-870f-7e9e06b124fd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implementation",
+      "created_at": "2026-11-12T23:43:18.131134-08:00"
     }
   ],
   "documents": [

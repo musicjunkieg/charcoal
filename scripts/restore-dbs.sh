@@ -3,7 +3,12 @@
 # blob storage (Cloudflare R2, Backblaze B2, etc.).
 #
 # Usage:
-#   ./scripts/restore-dbs.sh
+#   ./scripts/restore-dbs.sh                 # the latest backup
+#   ./scripts/restore-dbs.sh --list          # list dated history copies
+#   ./scripts/restore-dbs.sh --from STAMP    # restore the copies from STAMP
+#
+# The pre-commit hook writes a dated copy under history/ on every upload,
+# so --from can go back past a bad backup (STAMP as --list prints it).
 #
 # Requires BACKUP_S3_BUCKET, BACKUP_S3_ACCESS_KEY_ID, BACKUP_S3_SECRET_ACCESS_KEY,
 # and BACKUP_S3_ENDPOINT to be set — either in .env or the environment.
@@ -26,7 +31,7 @@ fi
 # Does NOT execute the file as bash; parses key=value line by line.
 _load_env() {
     local line key value
-    while IFS= read -r line; do
+    while IFS= read -r line || [ -n "$line" ]; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue        # skip comments
         [[ -z "${line//[[:space:]]/}" ]] && continue        # skip blank lines
         line="${line#export }"                               # strip leading 'export '
@@ -58,24 +63,57 @@ export AWS_SECRET_ACCESS_KEY="$BACKUP_S3_SECRET_ACCESS_KEY"
 S3="s3://$BACKUP_S3_BUCKET"
 ENDPOINT=(--endpoint-url "$BACKUP_S3_ENDPOINT" --region "${BACKUP_S3_REGION:-auto}")
 
-echo "🗄️  Restoring databases from $BACKUP_S3_BUCKET..."
+MODE=latest
+STAMP=""
+case "${1:-}" in
+    "") ;;
+    --list) MODE=list ;;
+    --from)
+        MODE=from
+        STAMP="${2:-}"
+        if [ -z "$STAMP" ]; then echo "❌ --from needs a STAMP (see --list)"; exit 1; fi ;;
+    *) echo "Usage: $0 [--list | --from STAMP]"; exit 1 ;;
+esac
+
+if [ "$MODE" = list ]; then
+    # `aws s3 ls` prints "<date> <time> <size> <name>"; group by stamp.
+    if ! listing=$(aws s3 ls "$S3/history/" "${ENDPOINT[@]}"); then
+        echo "❌ Couldn't list $S3/history/ — check bucket name and credentials"
+        exit 1
+    fi
+    echo "$listing" | awk '{ print $NF }' \
+        | sed -nE 's/^(issues|deciduous)-(.+)\.db$/\2 \1/p' | sort \
+        | awk '{ dbs[$1] = dbs[$1] " " $2 } END { for (s in dbs) print s ":" dbs[s] }' | sort
+    exit 0
+fi
+
+# Object names for each DB in this mode.
+if [ "$MODE" = from ]; then
+    ISSUES_KEY="history/issues-$STAMP.db"
+    DECIDUOUS_KEY="history/deciduous-$STAMP.db"
+    echo "🗄️  Restoring databases from $BACKUP_S3_BUCKET as of $STAMP..."
+else
+    ISSUES_KEY="issues.db"
+    DECIDUOUS_KEY="deciduous.db"
+    echo "🗄️  Restoring databases from $BACKUP_S3_BUCKET..."
+fi
 
 # ── chainlink issues ─────────────────────────────────────────────────
 mkdir -p "$REPO_ROOT/.chainlink"
 RESTORE_FAILED=0
-if aws s3 cp "$S3/issues.db" "$REPO_ROOT/.chainlink/issues.db" "${ENDPOINT[@]}" --quiet; then
+if aws s3 cp "$S3/$ISSUES_KEY" "$REPO_ROOT/.chainlink/issues.db" "${ENDPOINT[@]}" --quiet; then
     echo "✅ .chainlink/issues.db restored"
 else
-    echo "❌ Failed to restore issues.db — check bucket name and credentials"
+    echo "❌ Failed to restore $ISSUES_KEY — check the name (see --list), bucket and credentials"
     RESTORE_FAILED=1
 fi
 
 # ── deciduous decision graph ─────────────────────────────────────────
 mkdir -p "$REPO_ROOT/.deciduous"
-if aws s3 cp "$S3/deciduous.db" "$REPO_ROOT/.deciduous/deciduous.db" "${ENDPOINT[@]}" --quiet; then
+if aws s3 cp "$S3/$DECIDUOUS_KEY" "$REPO_ROOT/.deciduous/deciduous.db" "${ENDPOINT[@]}" --quiet; then
     echo "✅ .deciduous/deciduous.db restored"
 else
-    echo "❌ Failed to restore deciduous.db — check bucket name and credentials"
+    echo "❌ Failed to restore $DECIDUOUS_KEY — check the name (see --list), bucket and credentials"
     RESTORE_FAILED=1
 fi
 

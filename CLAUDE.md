@@ -222,6 +222,24 @@ After cloning, run `./scripts/install-hooks.sh` to install quality gates:
   hook builds the frontend once before linting.
   Preview what a push would run without running it:
   `CHARCOAL_HOOK_DRY_RUN=1 .git/hooks/pre-push origin < /dev/null`
+- **pre-merge-commit**: blocks merge commits on `main`.
+
+**Create `.hookenv` once per checkout, or pushes fail on model-gated tests.**
+Test binaries don't load `.env`, so pre-push reads its environment from
+`.hookenv` at the repo root: gitignored, one `KEY=value` per line, parsed (not
+executed). Charcoal needs one line, with an absolute path so it also works from
+worktrees:
+```
+CHARCOAL_MODEL_DIR=/absolute/path/to/charcoal/models
+```
+Sesh copies `.hookenv` into each session worktree (`.sesh/config.json` `copy`
+list). This replaced the hook's old built-in `CHARCOAL_MODEL_DIR` default (#284)
+when the hooks were synced from project-template in 2026-11.
+
+The pre-push gate above is charcoal's own (#367). The template's version runs
+the whole suite, so after any `update-project-from-template` run, re-apply the
+block marked `LOCAL EXCEPTION TO THE TEMPLATE (#367)` in
+`scripts/install-hooks.sh`.
 
 **CI is the full safety net, not the hooks.** Every pull request runs the whole
 suite. One job lints with no features, with web, and with the production web +

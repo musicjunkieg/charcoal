@@ -1,5 +1,21 @@
 [
   {
+    "hash": "3119f9b1544b5edd4ad6785ee577ab0e2f954a53",
+    "short_hash": "3119f9b",
+    "author": "Bryan Guffey",
+    "date": "2026-11-12T21:41:14-08:00",
+    "message": "Merge pull request #165 from Work-Right/staging\n\nchore(release): promote staging to main (#427 ONNX arena shrink, #432 Sesh config)",
+    "files_changed": 0
+  },
+  {
+    "hash": "e8f9740f8adf24a4340e63eb14a512b5ea5f4648",
+    "short_hash": "e8f9740",
+    "author": "Bryan Guffey",
+    "date": "2026-11-12T19:58:58-08:00",
+    "message": "fix(432): write the session PORT first in .env\n\nCodeRabbit on #166: filtering only `^PORT=` missed `export PORT=` and\n`PORT = …`, and appending PORT last left earlier ${PORT} references\nexpanding to nothing. dotenvy keeps the FIRST value it sees for a key\n(iter.rs load skips keys already set), so writing PORT as line one\nmakes the session port win however the rest of the file spells it;\nthe widened filter just drops the stale duplicates.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
     "hash": "7557204aad0c10e98952f0cf601c39c720f7f133",
     "short_hash": "7557204",
     "author": "Bryan Guffey",
