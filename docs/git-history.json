@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7557204aad0c10e98952f0cf601c39c720f7f133",
+    "short_hash": "7557204",
+    "author": "Bryan Guffey",
+    "date": "2026-11-12T19:44:14-08:00",
+    "message": "fix(432): stop sessionSetup when .env cannot be read\n\nCodeRabbit on #166: the `;` after grep let echo and mv run even when\ngrep failed to read .env, replacing the copied credentials with a file\nholding only PORT. Only grep exit 1 (no lines kept) is tolerated now;\nany other failure stops before .env is touched.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
     "hash": "541424a27ea8e48732a8436e938c3ca60de03562",
     "short_hash": "541424a",
     "author": "Bryan Guffey",
