@@ -14002,6 +14002,28 @@
       "created_at": "2026-11-13T18:11:01.621904-08:00",
       "updated_at": "2026-11-13T18:11:01.621904-08:00",
       "metadata_json": "{\"branch\":\"sesh/template-sync-charcoal\",\"commit\":\"d711dc4\",\"confidence\":85,\"files\":[\"scripts/install-hooks.sh\",\".claude/hooks/work-check.py\",\"scripts/restore-dbs.sh\"]}"
+    },
+    {
+      "id": 1283,
+      "change_id": "c0ebe3b4-d9b8-4e29-808a-51db3c4ab939",
+      "node_type": "outcome",
+      "title": "Re-sync 69260e4 pushed; CI green; all review findings template-managed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-13T18:18:50.406223-08:00",
+      "updated_at": "2026-11-13T18:18:50.406223-08:00",
+      "metadata_json": "{\"branch\":\"sesh/template-sync-charcoal\",\"commit\":\"69260e4\",\"confidence\":85}"
+    },
+    {
+      "id": 1284,
+      "change_id": "bd901994-0e24-4e3e-9e11-152be0c69ee5",
+      "node_type": "action",
+      "title": "Final re-sync to template ddf8715; re-port #367 gate",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-11-13T20:01:45.434555-08:00",
+      "updated_at": "2026-11-13T20:01:45.434555-08:00",
+      "metadata_json": "{\"branch\":\"sesh/template-sync-charcoal\",\"commit\":\"69260e4\",\"confidence\":85,\"files\":[\"scripts/install-hooks.sh\",\"scripts/link-shared-dbs.sh\",\"scripts/restore-dbs.sh\",\".claude/hooks/work-check.py\"]}"
     }
   ],
   "edges": [
@@ -28568,6 +28590,17 @@
       "weight": 1.0,
       "rationale": "same decision, newer template",
       "created_at": "2026-11-13T18:11:06.467370-08:00"
+    },
+    {
+      "id": 1335,
+      "from_node_id": 1282,
+      "to_node_id": 1283,
+      "from_change_id": "53d0b8ba-6223-4f12-94cc-3d5d2988f1da",
+      "to_change_id": "c0ebe3b4-d9b8-4e29-808a-51db3c4ab939",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result",
+      "created_at": "2026-11-13T18:18:50.428667-08:00"
     }
   ],
   "documents": [

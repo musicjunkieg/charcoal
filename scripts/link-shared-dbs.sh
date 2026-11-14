@@ -12,8 +12,9 @@
 # exist yet: the first write through the link creates it there.
 #
 # A worktree that already has a real DB file keeps it (with a warning) —
-# it may hold work that isn't in the primary's DB. In the primary checkout
-# itself this is a no-op.
+# it may hold work that isn't in the primary's DB. A DB whose folder is
+# already a link to the primary's is shared as it is. In the primary
+# checkout itself this is a no-op.
 
 set -e
 
@@ -49,9 +50,29 @@ if [ -z "$PRIMARY" ]; then
     exit 0
 fi
 
+# The path behind $1, through a linked file or a linked folder (as in
+# install-hooks.sh and restore-dbs.sh).
+_real_path() {
+    local p="$1" t d n=0
+    while [ -L "$p" ] && [ $n -lt 40 ]; do
+        t="$(readlink "$p")"
+        case "$t" in /*) p="$t" ;; *) p="$(dirname "$p")/$t" ;; esac
+        n=$((n + 1))
+    done
+    d="$(cd -P "$(dirname "$p")" 2>/dev/null && pwd -P)" || { echo "$p"; return; }
+    echo "$d/$(basename "$p")"
+}
+
 for db in .chainlink/issues.db .deciduous/deciduous.db; do
     target="$PRIMARY/$db"
     link="$REPO_ROOT/$db"
+    # A worktree whose whole DB folder links to the primary's (tandem's
+    # Sesh setup) already shares the DB. Linking the file there would put a
+    # link to itself in the primary.
+    if [ "$(_real_path "$(dirname "$link")")" = "$(_real_path "$(dirname "$target")")" ]; then
+        echo "✅ $db is already shared (its folder links to the primary's)"
+        continue
+    fi
     if [ -L "$link" ]; then
         ln -sfn "$target" "$link"
     elif [ -e "$link" ]; then

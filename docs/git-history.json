@@ -1,5 +1,13 @@
 [
   {
+    "hash": "69260e461813e1ee4ec4ea7987df42d1a4cf304b",
+    "short_hash": "69260e4",
+    "author": "Bryan Guffey",
+    "date": "2026-11-13T18:11:06-08:00",
+    "message": "chore: re-sync from project-template ffee501\n\nBrings in #66 (backups fail closed on a corrupt DB or unreadable row\ncount; linked folders backed up; restore writes through links), #67 (no\nstaging of untracked empty exports), #69 (work-check blocks only git\ncommands bash actually runs, e.g. no longer a git merge mention in a\nmessage; refuses commit/merge/push when pre-commit or pre-push is not\ninstalled) and #70 (BACKUP_S3_PREFIX; .env mode 600).\n\ninstall-hooks.sh is the template version with charcoal's #367\naffected-tests pre-push gate re-ported under the .hookenv loader,\nunchanged from the previous commit. .gitattributes and .sesh/config.json\nkeep charcoal's versions.\n\nRefs #434\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
     "hash": "d711dc4b84df32ba86619572608200ff824eabab",
     "short_hash": "d711dc4",
     "author": "Bryan Guffey",

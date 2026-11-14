@@ -40,6 +40,8 @@ HOOKS_PATH_BLOCK = "git config core.hooksPath"
 # Not a command: what blocks a commit/merge/push when the installed hooks
 # are gone (see _hooks_missing).
 HOOKS_MISSING = "hooks missing"
+# Not a command: what blocks a commit/push from main in a cloud session.
+CLOUD_ON_MAIN = "cloud commit on main"
 # Core blocks whose harm is skipping the hooks rather than losing work.
 _HOOK_SKIP_BLOCKS = frozenset((
     "git commit --no-verify", "git commit -n", "git merge --no-verify",
@@ -321,6 +323,23 @@ def _env_assignments(seg):
     return found
 
 
+def _exported(seg):
+    """The assignments a segment makes for later commands: operands of
+    export/declare/… (after any builtin/command), or a segment that is only
+    assignments (`HOME=/x;` changes an already-exported HOME for every later
+    command). Not ones leading a command (`HOME=/x npm test`)."""
+    assign = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+    if seg and all(assign.match(w) or w in _SUBSHELL_OPENERS for w in seg):
+        return [w for w in seg if assign.match(w)]
+    i = 0
+    while i < len(seg) and (seg[i] in _SUBSHELL_OPENERS or seg[i] in ("builtin", "command")
+                            or assign.match(seg[i])):
+        i += 1
+    if i < len(seg) and seg[i] in _DECLARERS:
+        return [w for w in seg[i + 1:] if assign.match(w)]
+    return []
+
+
 def _git_calls(command):
     """Each git invocation bash would run directly, as (assignments, git
     options, subcommand, args): found in every line and separator-delimited
@@ -437,6 +456,11 @@ def _invocation_hits(pattern, invocations):
         def has(word):
             if word in args:
                 return True
+            # `git checkout ./`, `-- ./.`, `:/` (the repo root): all of `.`.
+            if word == "." and any(
+                    a in (":/", ":/.", ":(top)") or (not a.startswith("-") and os.path.normpath(a) == ".")
+                    for a in args):
+                return True
             # git takes an unambiguous prefix of a long option (--no-ve).
             if word.startswith("--") and any(_long_prefix(a, word) for a in args):
                 return True
@@ -454,8 +478,10 @@ _CONFIG_ENV = re.compile(r"^(GIT_CONFIG\w*|GIT_DIR|GIT_COMMON_DIR)=")
 _GIT_OWN_ENV = re.compile(r"^(HOME|XDG_CONFIG_HOME)=")
 # Config keys that switch hooks off or pull in another config file.
 _HOOK_KEYS = ("hookspath", "include.path", "includeif.")
+# --show-origin/--show-scope only decorate a read; with a key and a value
+# git still writes, so they don't count.
 _CONFIG_READS = frozenset(("--get", "--get-all", "--get-regexp", "--list", "-l",
-                           "get", "list", "--show-origin", "--show-scope"))
+                           "get", "list"))
 # git config options that take the next word as their value.
 _CONFIG_VALUE_OPTIONS = frozenset(("-f", "--file", "--blob", "--type", "--default",
                                    "--comment", "--value", "--url", "-t"))
@@ -479,6 +505,9 @@ def _disables_hooks(command):
     for tokens in _command_lines(command):
         for seg in _split_segments(tokens):
             if any(_CONFIG_ENV.match(t) for t in _env_assignments(seg)):
+                return True
+            # `export HOME=…; git commit`: the later git reads that config.
+            if any(_GIT_OWN_ENV.match(t) for t in _exported(seg)):
                 return True
     for assigns, opts, sub, args in calls:
         if any(_CONFIG_ENV.match(a) or _GIT_OWN_ENV.match(a) for a in assigns):
@@ -664,10 +693,55 @@ def _hooks_missing(dirs=(".",), hook_names=("pre-commit",)):
     return False
 
 
-def _current_branch():
+def _switch_target(sub, args):
+    """The branch a `git switch`/`git checkout` leaves the checkout on, or
+    None: the new branch with -c/-C/-b/-B (`switch -c topic main` is on
+    topic), nothing for a file checkout (`checkout main -- README.md`),
+    else the first non-option word."""
+    if sub not in ("checkout", "switch"):
+        return None
+    if "--" in args:
+        k = args.index("--")
+        if sub == "switch":
+            # For switch, `--` only ends the options: `switch -- main`.
+            args = args[:k] + args[k + 1:]
+        elif args[k + 1:]:
+            return None  # `checkout BRANCH -- FILE`: a file checkout, no switch
+        else:
+            args = args[:k]  # `checkout main --` still switches
+    creates = ("-c", "-C", "--create", "--force-create", "-b", "-B", "--orphan")
+    for i, a in enumerate(args):
+        if a in creates and i + 1 < len(args):
+            return args[i + 1]
+        for opt in ("--create=", "--force-create=", "--orphan="):
+            if a.startswith(opt):
+                return a[len(opt):]
+    # `--track origin/main` (no -b/-c) creates and switches to `main`.
+    for i, a in enumerate(args):
+        if a in ("-t", "--track") and i + 1 < len(args):
+            return args[i + 1].split("/", 1)[-1]
+    words = [a for a in args if not a.startswith("-")]
+    return words[0] if words else None
+
+
+def _pushes_to_main(command):
+    """Whether a git push names main as a destination: `main`, `HEAD:main`,
+    `feat:main`, `refs/heads/main` (with or without a leading `+`)."""
+    for sub, args in _git_invocations(command):
+        if sub != "push":
+            continue
+        refspecs = [a for a in args if not a.startswith("-")][1:]  # after the remote
+        for ref in refspecs:
+            dest = ref.lstrip("+").split(":")[-1]
+            if dest in ("main", "refs/heads/main"):
+                return True
+    return False
+
+
+def _current_branch(directory="."):
     try:
         out = subprocess.run(
-            ["git", "branch", "--show-current"],
+            ["git", "-C", directory, "branch", "--show-current"],
             capture_output=True, text=True, timeout=5,
         )
         return out.stdout.strip() if out.returncode == 0 else ""
@@ -703,10 +777,16 @@ def blocked_git_hit(input_data, blocked_list):
 def block_reason(hit, configured):
     """Why `hit` is blocked: a core block (permanent, every project), the
     project's own blocked_git_commands, or the template default."""
+    if hit == CLOUD_ON_MAIN:
+        return (
+            "This cloud session's checkout is on main, and cloud sessions have no "
+            "git hooks to keep commits and pushes off it. Create a branch first "
+            "(`git switch -c <name>`), then commit and push that.\n\n"
+        )
     if hit == HOOKS_MISSING:
         return (
-            "This repo's git hooks aren't installed (.git/hooks/pre-commit or "
-            "pre-push is missing or not executable), so nothing keeps commits, merges and "
+            "This repo's git hooks aren't installed (.git/hooks/pre-commit, "
+            "pre-push or pre-merge-commit is missing or not executable), so nothing keeps commits, merges and "
             "pushes off main. Reinstall them with `bash scripts/install-hooks.sh`, "
             "then retry.\n\n"
         )
@@ -769,6 +849,11 @@ def _skip_heredoc_bodies(cmd, pos, line):
     delims = []
     for k, tok in enumerate(tokens[:-1]):
         if tok != "<<":
+            continue
+        # Inside `$(( … ))` or `(( … ))` it's a left shift, not a heredoc.
+        # (Quoted text, kept with its quotes by this lexer, doesn't count.)
+        before = "".join(t for t in tokens[:k] if t[:1] not in ("'", '"'))
+        if before.count("((") > before.count("))"):
             continue
         d, strip_tabs = tokens[k + 1], False
         if d.startswith("-"):
@@ -1072,9 +1157,20 @@ def main():
             dirs = _git_target_dirs(command)
             if _hooks_path_set(dirs):
                 hit = HOOKS_PATH_BLOCK
-            elif _hooks_missing(dirs, ("pre-commit", "pre-push") if "push" in subs
-                                else ("pre-commit",)):
+            elif _hooks_missing(dirs, ("pre-commit",)
+                                + (("pre-push",) if "push" in subs else ())
+                                + (("pre-merge-commit",) if "merge" in subs else ())):
                 hit = HOOKS_MISSING
+            # A cloud session never installs the hooks that keep commits and
+            # pushes off main, so refuse them here when its checkout is on main.
+            elif is_cloud_session() and (
+                    (subs & {"commit", "push"}
+                     and (any(_current_branch(d) == "main" for d in (dirs or ["."]))
+                          # `git switch main && git commit`: on main by then.
+                          or any(_switch_target(sub, args) == "main"
+                                 for sub, args in _git_invocations(command))))
+                    or _pushes_to_main(command)):
+                hit = CLOUD_ON_MAIN
     if hit:
         why = block_reason(hit, configured=blocked_git_configured(chainlink_dir))
         # exit 2 → Claude Code reads the block reason from stderr; stdout
