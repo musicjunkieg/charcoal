@@ -179,7 +179,10 @@ fi
 # as a worktree without state and preserve HEAD's version.
 #
 # Args: $1 = repo-relative path, $2 = top-level JSON key (list-typed)
-# Returns 0 (true) if adding would clobber; 1 (false) if safe to add.
+# Returns 0 (true) if adding would clobber; 1 (false) if safe to add; 2 if
+# the export is empty or invalid and HEAD doesn't track the file at all:
+# nothing worth committing, so leave it unstaged (a project whose main has
+# no exports yet would otherwise get empty ones in every PR).
 # Requires python3; degrades to always-safe-to-add if python3 missing.
 _would_clobber() {
     # $1 = path, $2 = the list to count: a top-level key, or "." when the
@@ -216,6 +219,7 @@ except Exception:
     if [ "$fresh_count" != "0" ] && [ "$fresh_count" != "-1" ]; then
         return 1
     fi
+    git cat-file -e "HEAD:$path" 2>/dev/null || return 2
 
     committed_count=$(git show "HEAD:$path" 2>/dev/null | python3 -c '
 import json, sys
@@ -240,6 +244,26 @@ except Exception:
     # matches HEAD.
     git checkout HEAD -- "$path" 2>/dev/null || true
     return 0
+}
+
+# Remove `$1` from the index if the staged copy's list (`$2`, as in
+# _would_clobber) is empty or unreadable. `-f`: the staged copy may differ
+# from the regenerated file (whitespace), which plain `rm --cached` refuses.
+_unstage_if_empty() {
+    local path="$1" key="$2" staged
+    git cat-file -e ":$path" 2>/dev/null || return 0
+    staged=$(git show ":$path" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    v = d if sys.argv[1] == "." else d.get(sys.argv[1], [])
+    print(len(v) if isinstance(v, list) else 0)
+except Exception:
+    print(0)
+' "$key" 2>/dev/null || echo 0)
+    if [ "${staged:-0}" = 0 ]; then
+        git rm --cached -f --quiet -- "$path" >/dev/null 2>&1 || true
+    fi
 }
 
 # ── 3. Export chainlink issues ───────────────────────────────────────
@@ -285,20 +309,28 @@ fi
 echo "📦 Pre-commit: syncing decision graph..."
 if (cd "$REPO_ROOT" && deciduous sync 2>/dev/null); then
     if [ -f "$REPO_ROOT/docs/graph-data.json" ]; then
-        if _would_clobber "docs/graph-data.json" "nodes"; then
-            echo "⚠️  Skipping graph-data.json: fresh export empty or invalid but HEAD has content (worktree may lack .deciduous/deciduous.db, or the export was truncated/corrupt). Committed version preserved."
-        else
-            git add docs/graph-data.json
-        fi
+        _rc=0; _would_clobber "docs/graph-data.json" "nodes" || _rc=$?
+        case $_rc in
+            0) echo "⚠️  Skipping graph-data.json: fresh export empty or invalid but HEAD has content (worktree may lack .deciduous/deciduous.db, or the export was truncated/corrupt). Committed version preserved." ;;
+            2) # Also undo a `git add -A` that staged it since (HEAD has no copy),
+               # if what's staged is empty too; staged real content stays.
+               _unstage_if_empty "docs/graph-data.json" "nodes"
+               echo "⏭️  Not staging graph-data.json: the export is empty and the file isn't committed yet." ;;
+            *) git add docs/graph-data.json ;;
+        esac
     fi
     # git-history.json is derived from git log, not from .deciduous state,
     # so it's not at clobber risk in an empty-state worktree.
     if [ -f "$REPO_ROOT/docs/git-history.json" ]; then
-        if _would_clobber "docs/git-history.json" "."; then
-            echo "⚠️  Skipping git-history.json: fresh export empty or invalid but HEAD has content (worktree may lack .deciduous/deciduous.db). Committed version preserved."
-        else
-            git add docs/git-history.json
-        fi
+        _rc=0; _would_clobber "docs/git-history.json" "." || _rc=$?
+        case $_rc in
+            0) echo "⚠️  Skipping git-history.json: fresh export empty or invalid but HEAD has content (worktree may lack .deciduous/deciduous.db). Committed version preserved." ;;
+            2) # Also undo a `git add -A` that staged it since (HEAD has no copy),
+               # if what's staged is empty too; staged real content stays.
+               _unstage_if_empty "docs/git-history.json" "."
+               echo "⏭️  Not staging git-history.json: the export is empty and the file isn't committed yet." ;;
+            *) git add docs/git-history.json ;;
+        esac
     fi
     echo "✅ Decision graph synced"
 else
@@ -320,7 +352,9 @@ elif [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$B
 
     export AWS_ACCESS_KEY_ID="$BACKUP_S3_ACCESS_KEY_ID"
     export AWS_SECRET_ACCESS_KEY="$BACKUP_S3_SECRET_ACCESS_KEY"
-    S3="s3://$BACKUP_S3_BUCKET"
+    # BACKUP_S3_PREFIX (set by `new-project --finish` on a second machine
+    # sharing the bucket) keeps each machine's objects apart.
+    S3="s3://$BACKUP_S3_BUCKET${BACKUP_S3_PREFIX:+/${BACKUP_S3_PREFIX%/}}"
 
     BACKUP_OK=true
 
@@ -345,10 +379,23 @@ elif [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$B
             fi
         done
     fi
+    # The file behind $1, through a linked file or a linked folder (Sesh
+    # setups link either). Best effort: what can't be resolved stays as is.
+    _real_path() {
+        local p="$1" t d n=0
+        while [ -L "$p" ] && [ $n -lt 40 ]; do
+            t="$(readlink "$p")"
+            case "$t" in /*) p="$t" ;; *) p="$(dirname "$p")/$t" ;; esac
+            n=$((n + 1))
+        done
+        d="$(cd -P "$(dirname "$p")" 2>/dev/null && pwd -P)" || { echo "$p"; return; }
+        echo "$d/$(basename "$p")"
+    }
     _backup_db() {
         [ -f "$REPO_ROOT/$1" ] || return 1
         [ "$_linked" = true ] || return 0
-        if [ -n "$_primary" ] && [ -L "$REPO_ROOT/$1" ] && [ "$(readlink "$REPO_ROOT/$1")" = "$_primary/$1" ]; then
+        if [ -n "$_primary" ] && [ -f "$_primary/$1" ] \
+            && [ "$(_real_path "$REPO_ROOT/$1")" = "$(_real_path "$_primary/$1")" ]; then
             return 0
         fi
         echo "  ⚠️  Skipping $1: not a link to the primary checkout's DB (run scripts/link-shared-dbs.sh)"
@@ -364,18 +411,45 @@ elif [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$B
     #      that chainlink/deciduous silently recreated looks like, and
     #      uploading it would overwrite the copy you'd restore from. An
     #      intended shrink goes through with BACKUP_ALLOW_SHRINK=1.
-    # The guard fails open: without sqlite3 the row check is skipped (and
-    # the stored count dropped, since it no longer describes the backup). A
-    # failed history copy doesn't fail the backup.
+    # Without sqlite3 the guard fails open: the row check is skipped (and
+    # the stored count dropped, since it no longer describes the backup).
+    # Otherwise it fails closed: a DB sqlite3 can't count (corrupt, or not
+    # a DB) or a stored count that can't be read (anything but "not
+    # found") skips the upload, so a bad DB never replaces a good backup.
+    # A failed history copy doesn't fail the backup.
     BACKUP_STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-    _rows() {  # $1 = db, $2 = table → row count, or nothing if unknown
+    _rows() {  # $1 = db, $2 = table → row count; nothing without sqlite3; fails if the query does
         command -v sqlite3 &>/dev/null || return 0
-        sqlite3 "$1" "SELECT COUNT(*) FROM $2;" 2>/dev/null | tr -dc '0-9'
+        local out
+        out=$(sqlite3 "$1" "SELECT COUNT(*) FROM $2;" 2>/dev/null) || return 1
+        out=$(printf '%s' "$out" | tr -dc '0-9')
+        [ -n "$out" ] || return 1
+        echo "$out"
     }
     _upload_db() {  # $1 = path under REPO_ROOT, $2 = object name, $3 = table
-        local src="$REPO_ROOT/$1" name="$2" rows prev
-        rows=$(_rows "$src" "$3")
-        prev=$(aws s3 cp "$S3/$name.db.rows" - "${ENDPOINT[@]}" 2>/dev/null | tr -dc '0-9')
+        local src="$REPO_ROOT/$1" name="$2" rows prev tmp err
+        if ! rows=$(_rows "$src" "$3"); then
+            if [ "${BACKUP_ALLOW_SHRINK:-}" != 1 ]; then
+                echo "  🛑 sqlite3 can't count $name.db's $3 rows — refusing to overwrite the backup with it."
+                echo "     It may be corrupt. Check it, restore it (scripts/restore-dbs.sh), or if it's fine:"
+                echo "     BACKUP_ALLOW_SHRINK=1 git commit ..."
+                return 1
+            fi
+            rows=""
+        fi
+        tmp="$(mktemp)"; err="$(mktemp)"
+        # Only the CLI's own missing-object status means "no count yet";
+        # any other failure (a 404 in an endpoint URL included) is a failure.
+        if aws s3 cp "$S3/$name.db.rows" - "${ENDPOINT[@]}" >"$tmp" 2>"$err"; then
+            prev=$(tr -dc '0-9' <"$tmp")
+        elif grep -qE 'An error occurred \((404|NoSuchKey)\) when calling the [A-Za-z]+ operation' "$err"; then
+            prev=""  # no count stored yet: nothing to compare against
+        else
+            rm -f "$tmp" "$err"
+            echo "  ⚠️  $name.db's last row count couldn't be read — not uploading (non-blocking)"
+            return 1
+        fi
+        rm -f "$tmp" "$err"
         if [ -n "$rows" ] && [ -n "$prev" ] && [ "$prev" -ge 4 ] && [ $((rows * 2)) -lt "$prev" ] \
             && [ "${BACKUP_ALLOW_SHRINK:-}" != 1 ]; then
             echo "  🛑 $name.db has $rows rows; the last backup had $prev — refusing to overwrite it."
@@ -411,7 +485,7 @@ elif [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$B
         fi
         aws s3 cp "$src" "$S3/history/$name-$BACKUP_STAMP.db" "${ENDPOINT[@]}" --quiet 2>&1 \
             || echo "  ⚠️  $name.db history copy failed (non-blocking)"
-        echo "  ✅ $name.db → $BACKUP_S3_BUCKET (+ history/$name-$BACKUP_STAMP.db)"
+        echo "  ✅ $name.db → ${S3#s3://} (+ history/$name-$BACKUP_STAMP.db)"
     }
 
     if _backup_db .chainlink/issues.db; then

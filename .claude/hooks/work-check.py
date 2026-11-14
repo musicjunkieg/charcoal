@@ -37,6 +37,9 @@ CORE_BLOCKED_GIT = [
     "git config core.hooksPath",
 ]
 HOOKS_PATH_BLOCK = "git config core.hooksPath"
+# Not a command: what blocks a commit/merge/push when the installed hooks
+# are gone (see _hooks_missing).
+HOOKS_MISSING = "hooks missing"
 # Core blocks whose harm is skipping the hooks rather than losing work.
 _HOOK_SKIP_BLOCKS = frozenset((
     "git commit --no-verify", "git commit -n", "git merge --no-verify",
@@ -201,6 +204,11 @@ _COMMAND_WRAPPERS = {
     "nohup": frozenset(),
     "time": frozenset(("-f", "--format", "-o", "--output")),
     "builtin": frozenset(),
+    "nice": frozenset(("-n", "--adjustment")),
+    "timeout": frozenset(("-s", "--signal", "-k", "--kill-after")),
+    "ionice": frozenset(("-c", "--class", "-n", "--classdata", "-p", "--pid")),
+    "stdbuf": frozenset(("-i", "--input", "-o", "--output", "-e", "--error")),
+    "caffeinate": frozenset(("-t", "-w")),
     "xargs": frozenset(("-I", "-i", "-n", "-L", "-l", "-P", "-d", "-E", "-e",
                         "-s", "-a", "--arg-file", "--delimiter", "--max-args",
                         "--max-lines", "--max-procs", "--max-chars")),
@@ -208,16 +216,19 @@ _COMMAND_WRAPPERS = {
                        "-p", "--prompt", "-C", "--close-from", "-D", "--chdir",
                        "-r", "--role", "-t", "--type", "-U", "--other-user")),
 }
-_SUBSHELL_OPENERS = frozenset(("(", "{", "!"))
+# Wrappers that take positional arguments before the command (`timeout 5 git …`).
+_WRAPPER_POSITIONALS = {"timeout": 1}
+# Words bash reads before a command in the same segment: subshell and group
+# openers, negation, and the reserved words of if/while/until/for/case
+# bodies (`then git reset`, `do git clean`).
+_SUBSHELL_OPENERS = frozenset(("(", "{", "!", "if", "then", "else", "elif",
+                               "do", "while", "until"))
 
 
 def _git_invocations(command):
-    """Each git invocation in a shell command as (subcommand, args), found
-    in every line and separator-delimited segment, after any leading
-    `VAR=value` assignments, wrappers like `env`, subshell openers and git
-    global options (`-C dir`, `--git-dir=…`, `--no-pager`). Commands hidden
-    in `$(…)`, backticks or `bash -c '…'` are not seen."""
-    return _git_invocations_parsed(command)[0]
+    """Each git invocation in a shell command as (subcommand, args). See
+    _git_calls."""
+    return [(sub, args) for _, _, sub, args in _git_calls(command)]
 
 
 def _strip_shell_comment(line):
@@ -260,37 +271,76 @@ def _strip_shell_comment(line):
     return line
 
 
-def _git_invocations_parsed(command):
-    """_git_invocations plus whether every line tokenized. A line shlex
-    can't parse (e.g. an apostrophe in a trailing `# don't` comment, which
-    bash ignores but shlex sees as an open quote) falls back to splitting
-    on whitespace, so its git commands are still found."""
-    found = []
-    clean = True
-    for line in _split_on_unquoted_newlines(command):
+# Bash's ANSI-C quoting, $'…' (with \' inside), which shlex can't read.
+_ANSI_C_STRING = re.compile(r"\$'(?:[^'\\]|\\.)*'")
+
+
+def _command_lines(command):
+    """The command's lines as token lists, the way bash reads them.
+    Comments go first, quote-aware: quotes inside a `# comment` are just
+    text to bash, but to shlex they'd pair up across lines and hide the
+    commands between them. A line shlex still can't parse is retried with
+    each $'…' string replaced by a placeholder; one that still won't parse
+    is skipped."""
+    out = []
+    for line in _split_on_unquoted_newlines(_strip_shell_comment(command)):
         tokens = _shell_tokenize(line)
-        token_lists = [tokens] if tokens is not None else []
         if tokens is None:
-            clean = False
-            # Read it two ways and keep what either finds, so a wrong guess
-            # in one can't hide a git command (fail closed):
-            #  - without a trailing `# comment`, as bash would, re-tokenized;
-            #  - the whole line split on whitespace and separators, with
-            #    quote and backslash characters dropped, so `'git' reset`
-            #    or `g\it reset` still read as `git reset`.
-            stripped = _shell_tokenize(_strip_shell_comment(line))
-            if stripped is not None:
-                token_lists.append(stripped)
-            token_lists.append([
-                t for t in (re.sub(r"[\"'\\]", "", w) for w in
-                            re.findall(r"&&|\|\||\|&|[;|&()]|[^\s;|&()]+", line))
-                if t
-            ])
-        for seg in (seg for toks in token_lists for seg in _split_segments(toks)):
+            tokens = _shell_tokenize(_ANSI_C_STRING.sub("'_'", line))
+        if tokens is not None:
+            out.append(tokens)
+    return out
+
+
+# Builtins whose operands are assignments (`export GIT_DIR=…`).
+_DECLARERS = frozenset(("export", "declare", "typeset", "local", "readonly"))
+
+
+def _env_assignments(seg):
+    """The `VAR=value` words in a segment that bash treats as assignments:
+    leading ones (after subshell openers and reserved words), operands of
+    export/declare/…, and those after `env` and its options. Not a commit
+    message or grep pattern that merely looks like one."""
+    assign = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+    found = []
+    i = 0
+    while i < len(seg) and (seg[i] in _SUBSHELL_OPENERS or assign.match(seg[i])):
+        if assign.match(seg[i]):
+            found.append(seg[i])
+        i += 1
+    while i < len(seg) and seg[i] in ("builtin", "command"):
+        i += 1
+    if i < len(seg) and seg[i] in _DECLARERS:
+        found.extend(w for w in seg[i + 1:] if assign.match(w))
+    elif i < len(seg) and seg[i] == "env":
+        i += 1
+        while i < len(seg) and (seg[i].startswith("-") or assign.match(seg[i])):
+            if assign.match(seg[i]):
+                found.append(seg[i])
+            i += 2 if seg[i] in _COMMAND_WRAPPERS["env"] else 1
+    return found
+
+
+def _git_calls(command):
+    """Each git invocation bash would run directly, as (assignments, git
+    options, subcommand, args): found in every line and separator-delimited
+    segment, after any leading `VAR=value` assignments, wrappers like `env`
+    or `nice`, redirections and subshell openers. Heredoc bodies are data,
+    not commands. Git hidden in `$(…)`, backticks, `bash -c '…'`, an alias
+    or another program isn't seen: auto mode and the runtime core.hooksPath
+    check cover those. A line shlex can't parse is retried without a
+    trailing `# comment` (which bash ignores), then skipped."""
+    found = []
+    for tokens in _command_lines(command):
+        for seg in _split_segments(tokens):
+            assigns = []
             i = 0
             while i < len(seg):
                 word = seg[i]
-                if word in _SUBSHELL_OPENERS or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", word):
+                if word in _SUBSHELL_OPENERS:
+                    i += 1
+                elif re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", word):
+                    assigns.append(word)
                     i += 1
                 elif word in _REDIRECTS or (
                     word.isdigit() and i + 1 < len(seg) and seg[i + 1] in _REDIRECTS
@@ -300,7 +350,8 @@ def _git_invocations_parsed(command):
                     i += 1 if word in _REDIRECTS else 2
                     i += 1  # the redirection's target
                 elif word in _COMMAND_WRAPPERS:
-                    # Skip the wrapper and its own options, up to `--`.
+                    # Skip the wrapper and its own options, up to `--`, then
+                    # any positionals it takes (timeout's duration).
                     takes_value = _COMMAND_WRAPPERS[word]
                     i += 1
                     while i < len(seg) and seg[i].startswith("-") and seg[i] != "-":
@@ -308,17 +359,21 @@ def _git_invocations_parsed(command):
                             i += 1
                             break
                         i += 2 if seg[i] in takes_value else 1
+                    i += _WRAPPER_POSITIONALS.get(word, 0)
                 else:
                     break
             if i >= len(seg) or os.path.basename(seg[i]) != "git":
                 continue
             i += 1
+            opts = []
             while i < len(seg) and seg[i].startswith("-"):
-                i += 2 if seg[i] in _GIT_VALUE_OPTIONS else 1
+                step = 2 if seg[i] in _GIT_VALUE_OPTIONS else 1
+                opts.extend(seg[i:i + step])
+                i += step
             if i < len(seg):
                 args = [a for a in seg[i + 1:] if a not in (")", "}")]
-                found.append((seg[i], args))
-    return found, clean
+                found.append((assigns, opts, seg[i], args))
+    return found
 
 
 def _is_force_push(args):
@@ -393,255 +448,110 @@ def _invocation_hits(pattern, invocations):
     return False
 
 
-# git commit's short flags that can share a cluster with -m (`-am`), and
-# alone: none opens an editor or reads config that could run the message.
-_COMMIT_CLUSTER_FLAGS = set("avsq")  # not n: --no-verify is core-blocked
-# The exact long flags allowed beside an exempt message. Git also takes
-# abbreviations (`--ed` for `--edit`), so anything not listed exactly —
-# including any abbreviation — means the whole command is scanned.
-_COMMIT_SAFE_LONG_FLAGS = frozenset((
-    "--all", "--quiet", "--signoff", "--verbose",
-    "--no-edit", "--allow-empty", "--amend", "--",
-))
-
-
-def _message_flag(word):
-    """'next' if `word` is a git commit flag taking the next word as the
-    message (-m, --message, a cluster like -am), 'self' if it carries the
-    message itself (-mTEXT, --message=TEXT), else None."""
-    if word in ("-m", "--message"):
-        return "next"
-    if word.startswith("--message="):
-        return "self"
-    if word.startswith("-") and not word.startswith("--") and len(word) > 2:
-        # A cluster: allowed flags, then m, then (optionally) the message
-        # attached: -am, -mTEXT, -amTEXT, -sam"TEXT".
-        flags = word[1:]
-        m = flags.find("m")
-        if m != -1 and set(flags[:m]) <= _COMMIT_CLUSTER_FLAGS:
-            return "next" if m == len(flags) - 1 else "self"
-    return None
-
-
-def _runs_nothing(text):
-    """Whether this (already unquoted) message can't expand into anything:
-    no `$` at all (parameter, arithmetic, `$(`…) and no backtick."""
-    return "$" not in text and "`" not in text
-
-
-def _scan_text(command):
-    """The command as text for the coarse scan, minus a git commit message
-    bash won't execute: `git commit -m 'never git reset'` mentions a core
-    command but runs only `git commit`.
-
-    Only when the whole command is one plain `git commit`: a single line
-    and segment, `git commit` as its first two words (no git options
-    between them: `-c core.editor=sh` could run the message), no
-    redirection, no `-e`/`--edit` (an editor gets the text), and a
-    message with no `$` or backtick. Anything else — a pipe or
-    redirection that could feed the text to a shell, another command,
-    `find -exec`, `xargs`, `sh -c` — is scanned whole."""
-    # Bash's $'…' and $"…" quoting has rules shlex doesn't follow (`\'`
-    # inside $'…'), so word boundaries can't be trusted: no exemption.
-    if "$'" in command or '$"' in command:
-        return command
-    lines = [ln for ln in _split_on_unquoted_newlines(command) if ln.strip()]
-    if len(lines) != 1:
-        return command
-    tokens = _shell_tokenize(lines[0])
-    if not tokens or any(t in _SEPARATORS or t in _REDIRECTS for t in tokens):
-        return command
-    if len(tokens) < 2 or os.path.basename(tokens[0]) != "git" or tokens[1] != "commit":
-        return command
-    # Every word after `git commit` must be a message flag (with its
-    # message), an allowed flag, or a path; otherwise scan it all.
-    drop = set()
-    n = 2
-    while n < len(tokens):
-        t = tokens[n]
-        kind = _message_flag(t)
-        if kind == "next" and n + 1 < len(tokens):
-            if _runs_nothing(tokens[n + 1]):
-                drop.add(n + 1)
-            n += 2
-            continue
-        if kind == "self":
-            if _runs_nothing(t):
-                drop.add(n)
-        elif t.startswith("--"):
-            if t not in _COMMIT_SAFE_LONG_FLAGS:
-                return command
-        elif t.startswith("-") and len(t) > 1:
-            if not set(t[1:]) <= _COMMIT_CLUSTER_FLAGS:
-                return command
-        n += 1
-    return " ".join(w for i, w in enumerate(tokens) if i not in drop)
-
-
-def _coarse_git_invocations(command):
-    """Every `git` word in the command, with what follows it up to a
-    separator, after dropping quotes, backslashes, brackets and `$(`. A
-    blunt reading run on every command (fail closed): git inside a string,
-    a substitution, `sh -c`, a pipe into a shell, `find -exec`, `timeout`…
-    is found whatever runs it. The cost is that a command merely
-    mentioning a core command (`grep 'git reset' docs/`) is blocked too,
-    except in a git commit message (see _scan_text)."""
-    # `!` too: a git alias runs `!git …` as a shell command.
-    text = re.sub(r"\$\(|[`'\"\\(){}<>!]", " ", command)
-    found = []
-    for seg in re.split(r"&&|\|\||[;&|\n]", text):
-        words = seg.split()
-        for j, w in enumerate(words):
-            if os.path.basename(w) != "git":
-                continue
-            k = j + 1
-            while k < len(words) and words[k].startswith("-"):
-                k += 2 if words[k] in _GIT_VALUE_OPTIONS else 1
-            if k < len(words):
-                found.append((words[k], words[k + 1:]))
-    return found
-
-
-def _shell_words_text(text):
-    """`text` with quotes, backslashes and `$(` removed, the way bash would
-    join `'core.hooks''Path'` or `core.hooks\\Path` into one word."""
-    return re.sub(r"\$\(|[`'\"\\()]", "", text)
+# Environment that points git at other config or another repo, which could
+# turn hooksPath on for one command: on git itself, or exported for later.
+_CONFIG_ENV = re.compile(r"^(GIT_CONFIG\w*|GIT_DIR|GIT_COMMON_DIR)=")
+_GIT_OWN_ENV = re.compile(r"^(HOME|XDG_CONFIG_HOME)=")
+# Config keys that switch hooks off or pull in another config file.
+_HOOK_KEYS = ("hookspath", "include.path", "includeif.")
+_CONFIG_READS = frozenset(("--get", "--get-all", "--get-regexp", "--list", "-l",
+                           "get", "list", "--show-origin", "--show-scope"))
+# git config options that take the next word as their value.
+_CONFIG_VALUE_OPTIONS = frozenset(("-f", "--file", "--blob", "--type", "--default",
+                                   "--comment", "--value", "--url", "-t"))
+_CONFIG_WRITES = frozenset(("set", "unset", "edit", "--unset", "--unset-all", "--add",
+                            "--replace-all", "--edit", "-e", "--rename-section",
+                            "--remove-section"))
 
 
 def _disables_hooks(command):
-    """Whether a command could turn git hooks off, read fail-closed on the
-    quote-normalized text (minus an exempt commit message): any mention of
-    core.hooksPath, git config includes (include.path, includeIf.*.path),
-    git config set through GIT_CONFIG* environment variables, or .git/hooks
-    itself (deleting or replacing a hook)."""
-    words = _shell_words_text(_scan_text(command))
-    text = words.lower()
-    paths = re.sub(r"/(\./)+", "/", re.sub(r"/{2,}", "/", text))
-    has_git = re.search(r"(^|[\s;&|()!])(\S*/)?git(\s|$)", text)
-    git_config = re.search(r"(^|\s)(-c|--config-env)(\s|=)|\bgit\s+config\b", words)
-    return bool(
-        "hookspath" in text
-        or "include.path" in text
-        or "includeif." in text
-        or re.search(r"\bgit_config\w*\s*=", text)
-        or ".git/hooks" in paths
-        or "--git-path hooks" in paths
-        # Where git reads config or the repo from, set inline.
-        or (has_git and re.search(
-            r"\b(home|xdg_config_home|git_dir|git_common_dir|git_config_nosystem)\s*=", text))
-        # A variable or substitution can spell out a config key the text
-        # never shows: with git config in play, any $ or backtick blocks,
-        # as does one in git's own option or subcommand position.
-        or (git_config and re.search(r"[$`]", command))
-        or _expansion_before_subcommand(command)
-    )
-
-
-def _expansion_before_subcommand(command):
-    """Whether any git invocation has a $ or backtick among git's own
-    options or in its subcommand position (`git "$OPT" commit`), where it
-    could become -c core.hooksPath=…. After the subcommand is fine
-    (`git checkout "$BRANCH"`). An untokenizable line counts as yes."""
-    for line in _split_on_unquoted_newlines(command):
-        tokens = _shell_tokenize(line)
-        if tokens is None:
-            if re.search(r"\bgit\b", line) and re.search(r"[$`]", line):
-                return True
-            continue
+    """Whether a git command here could turn git hooks off: core.hooksPath
+    or a config include set with `-c`/`--config-env` or written with `git
+    config`, GIT_CONFIG*/GIT_DIR (or HOME/XDG_CONFIG_HOME on git itself)
+    pointing it at other config, or a $ or backtick among git's options or
+    in its subcommand slot (`git $OPT commit`), which could become any of
+    those. Read from the git commands bash runs, so a message or a grep that
+    only mentions core.hooksPath isn't one. A hooksPath set some other way
+    is caught at runtime (_hooks_path_set)."""
+    calls = _git_calls(command)
+    if not calls:
+        return False
+    for tokens in _command_lines(command):
         for seg in _split_segments(tokens):
-            for i, word in enumerate(seg):
-                if os.path.basename(word) != "git":
+            if any(_CONFIG_ENV.match(t) for t in _env_assignments(seg)):
+                return True
+    for assigns, opts, sub, args in calls:
+        if any(_CONFIG_ENV.match(a) or _GIT_OWN_ENV.match(a) for a in assigns):
+            return True
+        if re.search(r"[$`]", sub) or any(re.search(r"[$`]", o) for o in opts):
+            return True
+        for j, opt in enumerate(opts):
+            value = None
+            if opt in ("-c", "--config-env") and j + 1 < len(opts):
+                value = opts[j + 1]
+            elif opt.startswith("--config-env="):
+                value = opt.split("=", 1)[1]
+            if value is not None and any(k in value.lower() for k in _HOOK_KEYS):
+                return True
+        if sub == "config":
+            # A read names the operation (`--get`, `--list`, or the `get`/
+            # `list` subcommand first); a value that happens to say "list"
+            # (`git config core.hooksPath list`) is a write.
+            positional, k = [], 0
+            while k < len(args):
+                if args[k] in _CONFIG_VALUE_OPTIONS:
+                    k += 2  # its value isn't the operation or the key
                     continue
-                j = i + 1
-                while j < len(seg) and seg[j].startswith("-"):
-                    if re.search(r"[$`]", seg[j]):
-                        return True
-                    if seg[j] in _GIT_VALUE_OPTIONS and j + 1 < len(seg):
-                        if re.search(r"[$`]", seg[j + 1]):
-                            return True
-                        j += 2
-                    else:
-                        j += 1
-                if j < len(seg) and re.search(r"[$`]", seg[j]):
-                    return True
+                if not args[k].startswith("-"):
+                    positional.append(args[k])
+                k += 1
+            reads = (any(a in _CONFIG_READS and a.startswith("-") for a in args)
+                     or (positional[:1] and positional[0] in ("get", "list")))
+            writes = (any(a in _CONFIG_WRITES for a in args)
+                      or (not reads and len(positional) >= 2))
+            # A key spelled through a variable (`git config "$K" /x`) could
+            # be core.hooksPath: refuse any such write.
+            touches = any(k in a.lower() for a in args for k in _HOOK_KEYS) or any(
+                re.search(r"[$`]", a) for a in args)
+            if touches and (writes or not reads):
+                return True
     return False
-
-
-# git subcommands that only read, for the merge-word backstop.
-_READ_ONLY_GIT = frozenset((
-    "log", "diff", "show", "status", "grep", "blame", "shortlog",
-    "describe", "rev-parse", "ls-files", "ls-tree", "cat-file", "reflog",
-))
-
-
-# Anything that can run a git merge somewhere other than the cwd, whose
-# branch is the one checked: changing directory, pointing git at another
-# repo, or a nested shell/wrapper the parser can't follow.
-_OTHER_CHECKOUT = re.compile(
-    r"(^|[\s;&|(])(cd|pushd|xargs|eval)(\s|$)"
-    r"|\bGIT_(DIR|WORK_TREE)\s*="
-    r"|(^|\s)(-C|--git-dir|--work-tree|--chdir)"
-    r"|\b(sh|bash|zsh|dash|ksh|fish)\s+(-\w+\s+)*-\w*c\b"
-    r"|\s-exec(dir)?\s"
-)
 
 
 def merge_on_main(input_data, current_branch):
     """Whether this command may run `git merge` on main. Merging main into
     a feature branch is allowed; merging into main (even a fast-forward,
     which no hook sees) is not. current_branch is the cwd's, so a merge
-    that changes directory or targets another repo (cd, pushd, -C,
-    --git-dir, GIT_DIR) or runs where the branch is unknown fails closed.
-    `git pull` isn't counted: updating main from upstream is normal."""
+    that switches branch first, changes directory or targets another repo
+    (cd, pushd, -C, --git-dir, GIT_DIR), comes with git options or a
+    wrapper, or runs where the branch is unknown is refused too. Only
+    merges bash runs directly count: a commit message or grep that says
+    "git merge" isn't one. `git pull` isn't counted: updating main from
+    upstream is normal."""
     command = input_data.get("tool_input", {}).get("command", "").strip()
-    # Scan the text minus an exempt commit message: a message may say
-    # "git merge origin/main" without merging anything.
-    scanned = _scan_text(command)
-    coarse = sum(1 for sub, _ in _coarse_git_invocations(scanned) if sub == "merge")
-    parsed = sum(1 for sub, _ in _git_invocations(command) if sub == "merge")
-    plain = _plain_merge_count(command)
-    # Backstop for forms neither parser reads: the word "merge" after a
-    # "git" anywhere (commit messages aside) counts as one more merge,
-    # unless every git command found is read-only, so "merge" is just an
-    # argument (git log --grep=merge, git diff -- merge.py).
-    # Brackets become spaces here (not deleted), so `q(git)` stays a word.
-    words = re.sub(r"[()]", " ", re.sub(r"\$\(|[`'\"\\]", " ", _scan_text(command)))
-    coarse_invocations = _coarse_git_invocations(scanned)
-    subs = {sub for sub, _ in _git_invocations(command) + coarse_invocations}
-    # Exempt only when every "git" word is one of those read-only commands:
-    # an unaccounted-for git (perl -e 'exec q(git), q(merge)') keeps it.
-    explained = (bool(subs) and subs <= _READ_ONLY_GIT
-                 and len(re.findall(r"\bgit\b", words)) == len(coarse_invocations)
-                 and _git_invocations_parsed(command)[1]
-                 and not re.search(r"[$`]|\beval\b|\b(sh|bash|zsh|dash|ksh)\s+(-\w+\s+)*-\w*c\b",
-                                   command))
-    mentioned = 1 if not explained and re.search(r"\bgit\b.*\bmerge\b", words, re.S) else 0
-    if not (coarse or parsed or plain or mentioned):
+    calls = _git_calls(command)
+    merges = sum(1 for _, _, sub, _ in calls if sub == "merge")
+    if not merges:
         return False
+    dirs = _git_target_dirs(command)
     return (current_branch in ("main", "")
-            # Every merge either parser sees must be a plain one: its
-            # segment's own command, with no git global options (-c
-            # core.worktree=…, -C, --git-dir can retarget it). Anything else
-            # (nice, an interpreter's -c, an alias, globals) fails closed.
-            or max(coarse, parsed, mentioned) > plain
-            # A branch switch earlier in the command means the merge lands
-            # on a branch other than the one checked (`git checkout main &&
-            # git merge --ff-only feat`).
-            or bool({sub for sub, _ in _git_invocations(command) + _coarse_git_invocations(command)}
-                    & {"checkout", "switch"})
-            or bool(_OTHER_CHECKOUT.search(_shell_words_text(command))))
+            # Every merge must be a plain one: its segment's own command,
+            # with no git global options (-c core.worktree=…, -C,
+            # --git-dir can retarget it) or wrapper.
+            or merges > _plain_merge_count(command)
+            # A branch switch in the same command means the merge lands on
+            # a branch other than the one checked.
+            or any(sub in ("checkout", "switch") for _, _, sub, _ in calls)
+            or dirs is None
+            or any(os.path.normpath(d) != "." for d in dirs))
 
 
 def _plain_merge_count(command):
     """`git merge` invocations that are their segment's own command (after
     any VAR=value) with no git global options between `git` and `merge`:
-    the only ones whose target checkout is surely the cwd. Lines that don't
-    tokenize count none, so the caller fails closed."""
+    the only ones whose target checkout is surely the cwd."""
     count = 0
-    for line in _split_on_unquoted_newlines(command):
-        tokens = _shell_tokenize(line)
-        if tokens is None:
-            continue
+    for tokens in _command_lines(command):
         for seg in _split_segments(tokens):
             i = 0
             while i < len(seg) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", seg[i]):
@@ -655,26 +565,16 @@ def _git_target_dirs(command):
     """The directories a command's git invocations will run in, following
     `cd`/`pushd` and `git -C` step by step from the cwd. None when a target
     can't be worked out (--git-dir/--work-tree, GIT_DIR/GIT_WORK_TREE, a $ or
-    ~ in a path, eval, a nested shell, a line that doesn't tokenize)."""
-    # Text checks read the command minus an exempt commit message, which
-    # can say "eval" or "GIT_DIR=" without running anything.
-    scanned = _scan_text(command)
-    if re.search(r"\beval\b|\b(sh|bash|zsh|dash|ksh)\s+(-\w+\s+)*-\w*c\b", scanned):
-        return None
-    # Repo or config set by assignment anywhere (export, declare, env, …).
-    if re.search(r"\bGIT_(DIR|WORK_TREE|CONFIG\w*)\s*=", scanned):
-        return None
+    ~ in a path, git behind a wrapper)."""
     cwd = "."
     dirs = []
-    for line in _split_on_unquoted_newlines(command):
-        tokens = _shell_tokenize(line)
-        if tokens is None:
-            return None
+    for tokens in _command_lines(command):
         for seg in _split_segments(tokens):
+            # Repo or config set by assignment (leading, export, env, …).
+            if any(re.match(r"^GIT_(DIR|WORK_TREE|CONFIG\w*)=", w) for w in _env_assignments(seg)):
+                return None
             i = 0
             while i < len(seg) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", seg[i]):
-                if re.match(r"^GIT_(DIR|WORK_TREE)=", seg[i]):
-                    return None
                 i += 1
             if i >= len(seg):
                 continue
@@ -684,7 +584,9 @@ def _git_target_dirs(command):
             # wrapper (env -C, sudo -D, xargs, find -exec, nice…) fails closed.
             if any(w in ("cd", "pushd", "popd") for w in seg[i + 1:]):
                 return None
-            if seg[i] in ("env", "builtin", "command", "exec", "popd"):
+            # eval/source run text in this shell, so a `cd` in it moves
+            # every git command after it.
+            if seg[i] in ("env", "builtin", "command", "exec", "popd", "eval", "source", "."):
                 return None
             if (seg[i] not in ("cd", "pushd") and os.path.basename(seg[i]) != "git"
                     and any(os.path.basename(w) == "git" for w in seg[i + 1:])):
@@ -732,6 +634,36 @@ def _hooks_path_set(dirs=(".",)):
     return False
 
 
+def _hooks_missing(dirs=(".",), hook_names=("pre-commit",)):
+    """Whether any of these repos uses the template's hooks
+    (scripts/install-hooks.sh at its top level) but lacks one of these
+    hooks, installed and executable, however it went missing. A cloud session
+    never installs them, so it isn't asked. Unknown targets (dirs is None)
+    are left to _hooks_path_set, which already refuses them."""
+    if dirs is None or is_cloud_session():
+        return False
+    for d in dict.fromkeys(dirs):
+        try:
+            out = subprocess.run(
+                ["git", "-C", d, "rev-parse", "--path-format=absolute",
+                 "--show-toplevel", "--git-common-dir"],
+                capture_output=True, text=True, timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        lines = out.stdout.split("\n")
+        if out.returncode != 0 or len(lines) < 2:
+            continue
+        top, common = lines[0], lines[1]
+        if not os.path.isfile(os.path.join(top, "scripts", "install-hooks.sh")):
+            continue
+        for name in hook_names:
+            hook = os.path.join(common, "hooks", name)
+            if not (os.path.isfile(hook) and os.access(hook, os.X_OK)):
+                return True
+    return False
+
+
 def _current_branch():
     try:
         out = subprocess.run(
@@ -744,69 +676,39 @@ def _current_branch():
 
 
 def blocked_git_match(input_data, blocked_list):
-    """The entry of blocked_list a Bash command hits, or None. Entries are
-    tried in order (core blocks come first; see load_config). Each matches
-    on the literal command text, as before, or on any git invocation in it,
-    by subcommand and flags in any position — so `git -C . reset`,
-    `git push origin main --force` or `env git rebase` don't slip past a
-    prefix match."""
-    return blocked_git_hit(input_data, blocked_list)[0]
+    """The entry of blocked_list a Bash command hits, or None. Each matches
+    any git invocation by subcommand and flags in any position, so
+    `git -C . reset`, `git push origin main --force` or `env git rebase`
+    don't slip past a prefix match."""
+    return blocked_git_hit(input_data, blocked_list)
 
 
 def blocked_git_hit(input_data, blocked_list):
-    """(entry hit, mention_only): mention_only when only the coarse scan
-    found it — the command may just mention the git command (in a grep
-    pattern, an echo) rather than run it. (None, False) if nothing hit."""
+    """The entry of blocked_list a Bash command runs, or None: hooks turned
+    off (see _disables_hooks) first, then the entries in order, so core
+    blocks (first; see load_config) win over the project's. Only git
+    commands bash runs directly count (see _git_calls)."""
     command = input_data.get("tool_input", {}).get("command", "").strip()
-    invocations, clean = _git_invocations_parsed(command)
-    # Text to scan: the command minus commit messages bash won't run; an
-    # unparseable line stays as written (see _scan_text).
-    scan = _scan_text(command)
-    coarse = _coarse_git_invocations(scan)
     if _disables_hooks(command):
-        return HOOKS_PATH_BLOCK, False
-    # Entries in order, so core blocks (first) win over the project's.
+        return HOOKS_PATH_BLOCK
+    invocations = _git_invocations(command)
     for blocked in blocked_list:
-        # The word-boundary refinement in _text_hits only applies when the
-        # command parsed cleanly; otherwise keep the plain prefix match.
-        if _text_hits(blocked, scan, word_boundary=clean) or _invocation_hits(blocked, invocations):
-            return blocked, False
-        if _invocation_hits(blocked, coarse):
-            return blocked, True
-    return None, False
+        # Hooks turned off are matched above, so `git config --get
+        # core.hooksPath` (a read) isn't refused as a prefix match.
+        if blocked != HOOKS_PATH_BLOCK and _invocation_hits(blocked, invocations):
+            return blocked
+    return None
 
 
-def _text_hits(blocked, command, word_boundary=True):
-    """The literal check: `blocked` at the start of the command or after
-    `&& `, `; ` or `| `. An entry ending in a word character must end at a
-    word boundary, so "git push --force" doesn't match
-    "git push --force-if-includes"; one ending otherwise ("git checkout .")
-    still matches as a prefix ("git checkout ./src")."""
-    if not blocked:
-        return False
-    starts = [0] + [m.end() for m in re.finditer(r"(?:&&|;|\|)\s*", command)]
-    for start in starts:
-        if not command.startswith(blocked, start):
-            continue
-        end = start + len(blocked)
-        if not word_boundary or not (blocked[-1].isalnum() or blocked[-1] == "_"):
-            return True
-        if end == len(command) or not (command[end].isalnum() or command[end] in "-_"):
-            return True
-    return False
-
-
-def block_reason(hit, configured, mention_only=False):
+def block_reason(hit, configured):
     """Why `hit` is blocked: a core block (permanent, every project), the
-    project's own blocked_git_commands, or the template default. With
-    mention_only, the command may only mention it — say that instead."""
-    if mention_only:
+    project's own blocked_git_commands, or the template default."""
+    if hit == HOOKS_MISSING:
         return (
-            f"This command mentions `{hit}` in a form the hook can't tell "
-            "apart from running it (inside a string, a substitution, or as "
-            "an argument to another program), so it's blocked to be safe. "
-            "Git commit messages are exempt. If the command only mentions "
-            "it (a search, an echo), ask the human to run it.\n\n"
+            "This repo's git hooks aren't installed (.git/hooks/pre-commit or "
+            "pre-push is missing or not executable), so nothing keeps commits, merges and "
+            "pushes off main. Reinstall them with `bash scripts/install-hooks.sh`, "
+            "then retry.\n\n"
         )
     if hit in _HOOK_SKIP_BLOCKS:
         return (
@@ -849,8 +751,48 @@ def is_blocked_git(input_data, blocked_list):
 _SEPARATORS = frozenset(("&&", "||", ";", "|", "&", "|&"))
 
 
+def _skip_heredoc_bodies(cmd, pos, line):
+    """Where the next command starts after `line`, which ended just before
+    `pos`: past the bodies of any heredocs `line` opens (`<<EOF`, `<<'EOF'`,
+    `<<-EOF`, which strips leading tabs from the closing line), in order.
+    A body with no closing line runs to the end of cmd, as in bash."""
+    # A `<<` inside a comment or a quote opens nothing: bash runs the next
+    # lines. So read the line with quotes kept (posix=False): a quoted "<<"
+    # stays "'<<'" and doesn't count.
+    try:
+        lex = shlex.shlex(_strip_shell_comment(line), posix=False, punctuation_chars=True)
+        lex.commenters = ""
+        lex.whitespace_split = True
+        tokens = [part for tok in lex for part in _split_operators(tok)]
+    except ValueError:
+        return pos
+    delims = []
+    for k, tok in enumerate(tokens[:-1]):
+        if tok != "<<":
+            continue
+        d, strip_tabs = tokens[k + 1], False
+        if d.startswith("-"):
+            d, strip_tabs = d[1:], True
+        d = re.sub(r"""["'\\]""", "", d)  # <<'EOF', <<"EOF", <<\EOF: delimiter EOF
+        if d:
+            delims.append((d, strip_tabs))
+    for d, strip_tabs in delims:
+        while pos < len(cmd):
+            end = cmd.find("\n", pos)
+            end = len(cmd) if end == -1 else end
+            body_line = cmd[pos:end].rstrip("\r")
+            pos = end + 1
+            if (body_line.lstrip("\t") if strip_tabs else body_line) == d:
+                break
+    return min(pos, len(cmd))
+
+
 def _split_on_unquoted_newlines(cmd):
     """Split cmd on newlines that aren't inside a shell quote.
+
+    A heredoc's body (`<<EOF` … `EOF`) is input to its command, not lines
+    bash runs, so it's left out: the line with the `<<` is kept, then the
+    body is skipped up to the delimiter line.
 
     A naive regex split on ``\\r?\\n`` would break legitimate multi-line
     values inside quotes — most importantly ``git commit -m 'line one
@@ -900,10 +842,12 @@ def _split_on_unquoted_newlines(cmd):
             elif c == "\n":
                 if current:
                     segments.append("".join(current))
+                    i = _skip_heredoc_bodies(cmd, i + 1, segments[-1]) - 1
                 current = []
             elif c == "\r" and i + 1 < n and cmd[i + 1] == "\n":
                 if current:
                     segments.append("".join(current))
+                    i = _skip_heredoc_bodies(cmd, i + 2, segments[-1]) - 2
                 current = []
                 i += 1  # consume the \r; \n is consumed by the i+=1 below
             else:
@@ -971,9 +915,27 @@ def _shell_tokenize(cmd):
         # (refuse to auto-allow) instead of permissive.
         lex.commenters = ""
         lex.whitespace_split = True
-        return list(lex)
+        return [part for tok in lex for part in _split_operators(tok)]
     except ValueError:
         return None
+
+
+# Shell operators, longest first, for splitting a run shlex keeps whole.
+_OPERATORS = ("&>>", "<<<", "&&", "||", "|&", ">>", "<<", "&>", ">&", "<&", "<>",
+              ">|", ";", "|", "&", "<", ">", "(", ")")
+
+
+def _split_operators(tok):
+    """shlex reads a run of operator characters as one token (`)&&`, `;(`);
+    bash reads separate operators. Split such a run; leave other tokens."""
+    if not tok or any(c not in "();<>|&" for c in tok) or tok in _OPERATORS:
+        return [tok]
+    parts, i = [], 0
+    while i < len(tok):
+        op = next((o for o in _OPERATORS if tok.startswith(o, i)), tok[i])
+        parts.append(op)
+        i += len(op)
+    return parts
 
 
 def _split_segments(tokens):
@@ -1099,20 +1061,22 @@ def main():
         )
         sys.exit(2)
 
-    hit, mention_only = (blocked_git_hit(input_data, blocked_git)
-                         if tool_name == 'Bash' else (None, False))
+    hit = blocked_git_hit(input_data, blocked_git) if tool_name == 'Bash' else None
     # Checked at runtime, not from the text: if core.hooksPath is already set
     # (any scope, however it got there), the hooks aren't running, so refuse
     # any git command that writes until a human puts it back.
     if not hit and tool_name == 'Bash':
         command = input_data.get("tool_input", {}).get("command", "")
-        subs = {sub for sub, _ in _git_invocations(command) + _coarse_git_invocations(command)}
-        if (subs & {"commit", "merge", "push", "rebase", "cherry-pick", "am"}
-                and _hooks_path_set(_git_target_dirs(command))):
-            hit, mention_only = HOOKS_PATH_BLOCK, False
+        subs = {sub for sub, _ in _git_invocations(command)}
+        if subs & {"commit", "merge", "push", "rebase", "cherry-pick", "am"}:
+            dirs = _git_target_dirs(command)
+            if _hooks_path_set(dirs):
+                hit = HOOKS_PATH_BLOCK
+            elif _hooks_missing(dirs, ("pre-commit", "pre-push") if "push" in subs
+                                else ("pre-commit",)):
+                hit = HOOKS_MISSING
     if hit:
-        why = block_reason(hit, configured=blocked_git_configured(chainlink_dir),
-                           mention_only=mention_only)
+        why = block_reason(hit, configured=blocked_git_configured(chainlink_dir))
         # exit 2 → Claude Code reads the block reason from stderr; stdout
         # is invisible in that path, so print via sys.stderr.
         print(

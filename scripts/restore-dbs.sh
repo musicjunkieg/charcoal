@@ -60,7 +60,14 @@ done
 export AWS_ACCESS_KEY_ID="$BACKUP_S3_ACCESS_KEY_ID"
 export AWS_SECRET_ACCESS_KEY="$BACKUP_S3_SECRET_ACCESS_KEY"
 
-S3="s3://$BACKUP_S3_BUCKET"
+# --prefix PREFIX restores another machine's backups ("" for the first
+# machine's, which have no prefix); otherwise BACKUP_S3_PREFIX from .env.
+if [ "${1:-}" = "--prefix" ]; then
+    [ $# -ge 2 ] || { echo "❌ --prefix needs a value (\"\" for no prefix)"; exit 1; }
+    BACKUP_S3_PREFIX="$2"
+    shift 2
+fi
+S3="s3://$BACKUP_S3_BUCKET${BACKUP_S3_PREFIX:+/${BACKUP_S3_PREFIX%/}}"
 ENDPOINT=(--endpoint-url "$BACKUP_S3_ENDPOINT" --region "${BACKUP_S3_REGION:-auto}")
 
 MODE=latest
@@ -72,7 +79,7 @@ case "${1:-}" in
         MODE=from
         STAMP="${2:-}"
         if [ -z "$STAMP" ]; then echo "❌ --from needs a STAMP (see --list)"; exit 1; fi ;;
-    *) echo "Usage: $0 [--list | --from STAMP]"; exit 1 ;;
+    *) echo "Usage: $0 [--prefix PREFIX] [--list | --from STAMP]"; exit 1 ;;
 esac
 
 if [ "$MODE" = list ]; then
@@ -91,18 +98,34 @@ fi
 if [ "$MODE" = from ]; then
     ISSUES_KEY="history/issues-$STAMP.db"
     DECIDUOUS_KEY="history/deciduous-$STAMP.db"
-    echo "🗄️  Restoring databases from $BACKUP_S3_BUCKET as of $STAMP..."
+    echo "🗄️  Restoring databases from ${S3#s3://} as of $STAMP..."
 else
     ISSUES_KEY="issues.db"
     DECIDUOUS_KEY="deciduous.db"
-    echo "🗄️  Restoring databases from $BACKUP_S3_BUCKET..."
+    echo "🗄️  Restoring databases from ${S3#s3://}..."
 fi
+
+# In a worktree the DBs are often links to the primary checkout's (a
+# linked file or folder). `aws s3 cp` renames its download onto the path,
+# which would replace a linked file with a private copy and leave the
+# shared DB stale, so write to the file behind the link instead.
+_real_path() {
+    local p="$1" t d n=0
+    while [ -L "$p" ] && [ $n -lt 40 ]; do
+        t="$(readlink "$p")"
+        case "$t" in /*) p="$t" ;; *) p="$(dirname "$p")/$t" ;; esac
+        n=$((n + 1))
+    done
+    d="$(cd -P "$(dirname "$p")" 2>/dev/null && pwd -P)" || { echo "$p"; return; }
+    echo "$d/$(basename "$p")"
+}
 
 # ── chainlink issues ─────────────────────────────────────────────────
 mkdir -p "$REPO_ROOT/.chainlink"
 RESTORE_FAILED=0
-if aws s3 cp "$S3/$ISSUES_KEY" "$REPO_ROOT/.chainlink/issues.db" "${ENDPOINT[@]}" --quiet; then
-    echo "✅ .chainlink/issues.db restored"
+ISSUES_DEST="$(_real_path "$REPO_ROOT/.chainlink/issues.db")"
+if aws s3 cp "$S3/$ISSUES_KEY" "$ISSUES_DEST" "${ENDPOINT[@]}" --quiet; then
+    echo "✅ .chainlink/issues.db restored ($ISSUES_DEST)"
 else
     echo "❌ Failed to restore $ISSUES_KEY — check the name (see --list), bucket and credentials"
     RESTORE_FAILED=1
@@ -110,8 +133,9 @@ fi
 
 # ── deciduous decision graph ─────────────────────────────────────────
 mkdir -p "$REPO_ROOT/.deciduous"
-if aws s3 cp "$S3/$DECIDUOUS_KEY" "$REPO_ROOT/.deciduous/deciduous.db" "${ENDPOINT[@]}" --quiet; then
-    echo "✅ .deciduous/deciduous.db restored"
+DECIDUOUS_DEST="$(_real_path "$REPO_ROOT/.deciduous/deciduous.db")"
+if aws s3 cp "$S3/$DECIDUOUS_KEY" "$DECIDUOUS_DEST" "${ENDPOINT[@]}" --quiet; then
+    echo "✅ .deciduous/deciduous.db restored ($DECIDUOUS_DEST)"
 else
     echo "❌ Failed to restore $DECIDUOUS_KEY — check the name (see --list), bucket and credentials"
     RESTORE_FAILED=1

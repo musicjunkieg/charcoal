@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d711dc4b84df32ba86619572608200ff824eabab",
+    "short_hash": "d711dc4",
+    "author": "Bryan Guffey",
+    "date": "2026-11-12T23:43:49-08:00",
+    "message": "chore: sync from project-template (2026-11)\n\nCame in from project-template main (bfd9b99): the AI review workflows\n(PR-Agent + Claude Haiku 5.5) and Semgrep; core git blocks in work-check\nwith `git merge` now allowed; a pre-merge-commit hook; backup history\nwith a shrink guard; .hookenv loading in pre-push; cloud-setup.sh,\nrestore-dbs.sh --list/--from, and link-shared-dbs.sh.\n\nKept or restored:\n- pre-push keeps charcoal's #367 affected-tests gate. The template\n  version runs plain `cargo test` over everything (no --features web).\n- the CHARCOAL_MODEL_DIR default is dropped in favour of .hookenv,\n  documented in CLAUDE.md and README; .hookenv added to the Sesh copy list.\n- the dated-backup / 25-row sanity gate is dropped; the template's\n  history/ copies + shrink guard replace it.\n- .sesh/config.json stays charcoal's (custom setup, PORT handling).\n- .gitattributes keeps linguist-generated/-diff on the deciduous exports\n  alongside the template's keep-ours driver.\n\nRefs #434\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "files_changed": 19
+  },
+  {
     "hash": "3119f9b1544b5edd4ad6785ee577ab0e2f954a53",
     "short_hash": "3119f9b",
     "author": "Bryan Guffey",
