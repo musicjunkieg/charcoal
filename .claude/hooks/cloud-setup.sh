@@ -23,17 +23,21 @@ SRC="$(cd "$(dirname "$0")" && pwd)/cloud-tools"
 DEST="${XDG_CACHE_HOME:-$HOME/.cache}/claude-cloud-tools"
 CF_PIN=$(sed -n 's/.*"cf": *"\([^"]*\)".*/\1/p' "$SRC/package.json" 2>/dev/null | head -1)
 
-# True only for Cloudflare's cf at exactly the pinned version (matched as
-# a whole word anywhere in the banner — cf appends " · delegated" under
-# CF_DELEGATION). A bare
-# `command -v cf` is not enough: Cloud Foundry's CLI is also called cf,
-# and a sandbox can carry an older cf from before a pin bump.
+# True only for Cloudflare's cf at exactly the pinned version. cf up to
+# 1.0.0-beta.26 prints a banner (`cf · v<pin>`, matched as a whole word
+# anywhere in it — cf appends " · delegated" under CF_DELEGATION); from
+# 1.0.0-beta.27 it prints the bare version, matched as the whole line.
+# A bare `command -v cf` is not enough: Cloud Foundry's CLI is also called
+# cf, and a sandbox can carry an older cf from before a pin bump.
 # ARG: path or name of the executable to test (default: cf on PATH).
 cf_is_pinned() {
     local bin="${1:-cf}"
     [ -n "$CF_PIN" ] && command -v "$bin" >/dev/null 2>&1 \
-        && "$bin" --version 2>/dev/null | grep -F 'cf · v' \
-            | awk -v want="v$CF_PIN" '{ for (i = 1; i <= NF; i++) if ($i == want) ok = 1 } END { exit !ok }'
+        && "$bin" --version 2>/dev/null \
+            | awk -v pin="$CF_PIN" '
+                $0 == pin { ok = 1 }
+                index($0, "cf · v") { for (i = 1; i <= NF; i++) if ($i == "v" pin) ok = 1 }
+                END { exit !ok }'
 }
 
 # True when the cached install was made from the committed lockfile. The cf
@@ -55,10 +59,32 @@ cf_is_cached() {
     [ "$(readlink -f "$on_path" 2>/dev/null)" = "$(readlink -f "$DEST/node_modules/.bin/cf" 2>/dev/null)" ]
 }
 
+# True when the cache holds the pinned cf, built from the committed lock.
+cache_is_current() {
+    cf_is_pinned "$DEST/node_modules/.bin/cf" && cache_matches_lock
+}
+
 install_cf() {
     local bindir
     [ -n "$CF_PIN" ] && [ -f "$SRC/package-lock.json" ] || { echo "no cloud-tools/package.json + package-lock.json"; return 1; }
-    if ! cf_is_pinned "$DEST/node_modules/.bin/cf" || ! cache_matches_lock; then
+    if ! cache_is_current; then
+        # Sessions sharing a HOME share this cache. Without a lock, one could
+        # re-stage the lockfile or node_modules while another runs npm ci,
+        # and the second would accept a tree built from the first's lock.
+        # The fd is held until install_cf's subshell exits. flock ships with
+        # util-linux on the Linux cloud images; where it is missing we run
+        # unlocked, as before. Wait at most 150s: the SessionStart hook is
+        # killed at 180s (.claude/settings.json), and a kill would leave no
+        # message; timing out first reports why cf is unavailable.
+        mkdir -p "$(dirname "$DEST")" || { echo "could not create $(dirname "$DEST")"; return 1; }
+        if command -v flock >/dev/null 2>&1; then
+            { exec 9>"$DEST.lock" && flock -w 150 9; } 2>/dev/null \
+                || { echo "timed out waiting for another session's cf install"; return 1; }
+        fi
+    fi
+    # Check again under the lock: the session we waited for may have just
+    # built exactly this lockfile.
+    if ! cache_is_current; then
         rm -f "$DEST/.install-complete" || { echo "could not invalidate $DEST"; return 1; }
         command -v npm >/dev/null 2>&1 || { echo "npm not found"; return 1; }
         mkdir -p "$DEST" && cp "$SRC/package.json" "$SRC/package-lock.json" "$DEST/" || { echo "could not stage $DEST"; return 1; }
@@ -101,8 +127,14 @@ if ! cf_is_pinned || { cf_is_cached && ! cache_matches_lock; }; then
     fi
 fi
 
-if cf_is_pinned && [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-    echo "cloud-setup: CLOUDFLARE_API_TOKEN is not set in this environment. Unless a cf auth profile is configured (check with 'cf auth whoami'), cf commands that touch the account will fail — ask Bryan to add the token to the cloud environment."
+# cf also reads CLOUDFLARE_API_TOKEN from the project's .env.
+env_has_cf_token() {
+    [ -f "${CLAUDE_PROJECT_DIR:-.}/.env" ] \
+        && grep -qE '^[[:space:]]*(export[[:space:]]+)?CLOUDFLARE_API_TOKEN=["'"'"']?[^"'"'"'[:space:]]' "${CLAUDE_PROJECT_DIR:-.}/.env"
+}
+
+if cf_is_pinned && [ -z "$CLOUDFLARE_API_TOKEN" ] && ! env_has_cf_token; then
+    echo "cloud-setup: CLOUDFLARE_API_TOKEN is not set in this environment. Unless a cf auth profile is configured (check with 'cf auth whoami'), cf commands that touch the account will fail — ask Bryan to add a scoped account API token to the cloud environment as an environment variable (a network secret does not work for cf)."
 fi
 
 exit 0

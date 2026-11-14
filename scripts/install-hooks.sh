@@ -9,6 +9,7 @@
 #                 chainlink issues + deciduous graph; backs up DBs to S3
 #   pre-push    — blocks main pushes; runs lint + only the tests the push
 #                 affects (the full suite runs in CI — #367)
+#   pre-merge-commit — blocks merge commits on main
 #
 # This file is a TEMPLATE. Customize the language-specific quality gates
 # (search "CUSTOMIZE" in the heredocs below) for your project's stack.
@@ -33,12 +34,31 @@ if ! _common_gitdir="$(cd "$REPO_ROOT" && git rev-parse --git-common-dir 2>/dev/
 fi
 HOOKS_DIR="$(cd "$REPO_ROOT" && cd "$_common_gitdir" && pwd -P)/hooks"
 
+# If core.hooksPath is set, git ignores $GIT_COMMON_DIR/hooks entirely —
+# everything this script installs would be silently dead. Say so instead
+# of printing a success message for hooks that will never run.
+# Test for the key's PRESENCE via exit code, not for a non-empty value:
+# `core.hooksPath=` (set but empty) still overrides — git resolves it to
+# `./` — while `git config --get` prints an empty string for it.
+# The per-clone setup further down (.gitignore.local, merge driver) doesn't
+# depend on where hooks live, so it still runs; only writing the hooks is
+# skipped, and the script exits non-zero at the end.
+HOOKS_DEAD=""
+if _hooks_path="$(cd "$REPO_ROOT" && git config --get core.hooksPath 2>/dev/null)"; then
+    HOOKS_DEAD="⚠️  core.hooksPath is set to '${_hooks_path:-(empty)}' — git will NOT read $HOOKS_DIR.
+    Unset it (git config --unset core.hooksPath) or install these hooks there instead."
+    echo "$HOOKS_DEAD"
+    echo "    Skipping the hooks; still doing the per-clone setup."
+fi
+
+PROJECT_NAME="$(basename "$REPO_ROOT")"
+
+if [ -z "$HOOKS_DEAD" ]; then
 if [ ! -d "$HOOKS_DIR" ]; then
     echo "❌ $HOOKS_DIR does not exist. Corrupted git repo?"
     exit 1
 fi
 
-PROJECT_NAME="$(basename "$REPO_ROOT")"
 echo "Installing $PROJECT_NAME git hooks..."
 
 # ── pre-commit ───────────────────────────────────────────────────────
@@ -63,7 +83,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 # Does NOT execute the file as bash; parses key=value line by line.
 _load_env() {
     local line key value
-    while IFS= read -r line; do
+    while IFS= read -r line || [ -n "$line" ]; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue        # skip comments
         [[ -z "${line//[[:space:]]/}" ]] && continue        # skip blank lines
         line="${line#export }"                               # strip leading 'export '
@@ -159,9 +179,16 @@ fi
 # as a worktree without state and preserve HEAD's version.
 #
 # Args: $1 = repo-relative path, $2 = top-level JSON key (list-typed)
-# Returns 0 (true) if adding would clobber; 1 (false) if safe to add.
+# Returns 0 (true) if adding would clobber; 1 (false) if safe to add; 2 if
+# the export is empty or invalid and either HEAD doesn't track the file at
+# all or the index doesn't have it (untracked, or `git rm`'d): nothing worth
+# committing, so leave it unstaged (a project whose main has no exports yet
+# would otherwise get empty ones in every PR, and a `git rm` of committed
+# empty exports would be undone by the regenerated copies).
 # Requires python3; degrades to always-safe-to-add if python3 missing.
 _would_clobber() {
+    # $1 = path, $2 = the list to count: a top-level key, or "." when the
+    # whole document is the list (git-history.json).
     local path="$1" key="$2"
     [ -f "$REPO_ROOT/$path" ] || return 1  # nothing to add anyway
     command -v python3 >/dev/null 2>&1 || return 1
@@ -184,7 +211,7 @@ _would_clobber() {
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
-    v = d.get(sys.argv[2], [])
+    v = d if sys.argv[2] == "." else d.get(sys.argv[2], [])
     print(len(v) if isinstance(v, list) else 0)
 except Exception:
     print(-1)
@@ -194,12 +221,16 @@ except Exception:
     if [ "$fresh_count" != "0" ] && [ "$fresh_count" != "-1" ]; then
         return 1
     fi
+    # Not in the index: the user removed it (or never added it). An empty
+    # regenerated copy is no reason to put it back.
+    git cat-file -e ":$path" 2>/dev/null || return 2
+    git cat-file -e "HEAD:$path" 2>/dev/null || return 2
 
     committed_count=$(git show "HEAD:$path" 2>/dev/null | python3 -c '
 import json, sys
 try:
     d = json.load(sys.stdin)
-    v = d.get(sys.argv[1], [])
+    v = d if sys.argv[1] == "." else d.get(sys.argv[1], [])
     print(len(v) if isinstance(v, list) else 0)
 except Exception:
     print(-1)
@@ -218,6 +249,26 @@ except Exception:
     # matches HEAD.
     git checkout HEAD -- "$path" 2>/dev/null || true
     return 0
+}
+
+# Remove `$1` from the index if the staged copy's list (`$2`, as in
+# _would_clobber) is empty or unreadable. `-f`: the staged copy may differ
+# from the regenerated file (whitespace), which plain `rm --cached` refuses.
+_unstage_if_empty() {
+    local path="$1" key="$2" staged
+    git cat-file -e ":$path" 2>/dev/null || return 0
+    staged=$(git show ":$path" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    v = d if sys.argv[1] == "." else d.get(sys.argv[1], [])
+    print(len(v) if isinstance(v, list) else 0)
+except Exception:
+    print(0)
+' "$key" 2>/dev/null || echo 0)
+    if [ "${staged:-0}" = 0 ]; then
+        git rm --cached -f --quiet -- "$path" >/dev/null 2>&1 || true
+    fi
 }
 
 # ── 3. Export chainlink issues ───────────────────────────────────────
@@ -263,102 +314,228 @@ fi
 echo "📦 Pre-commit: syncing decision graph..."
 if (cd "$REPO_ROOT" && deciduous sync 2>/dev/null); then
     if [ -f "$REPO_ROOT/docs/graph-data.json" ]; then
-        if _would_clobber "docs/graph-data.json" "nodes"; then
-            echo "⚠️  Skipping graph-data.json: fresh export empty or invalid but HEAD has content (worktree may lack .deciduous/deciduous.db, or the export was truncated/corrupt). Committed version preserved."
-        else
-            git add docs/graph-data.json
-        fi
+        _rc=0; _would_clobber "docs/graph-data.json" "nodes" || _rc=$?
+        case $_rc in
+            0) echo "⚠️  Skipping graph-data.json: fresh export empty or invalid but HEAD has content (worktree may lack .deciduous/deciduous.db, or the export was truncated/corrupt). Committed version preserved." ;;
+            2) # Also undo a `git add -A` that staged it since (when HEAD has no copy),
+               # if what's staged is empty too; staged real content stays.
+               _unstage_if_empty "docs/graph-data.json" "nodes"
+               echo "⏭️  Not staging graph-data.json: the export is empty and the file isn't committed yet (or was removed from the index)." ;;
+            *) git add docs/graph-data.json ;;
+        esac
     fi
     # git-history.json is derived from git log, not from .deciduous state,
     # so it's not at clobber risk in an empty-state worktree.
-    [ -f "$REPO_ROOT/docs/git-history.json" ] && git add docs/git-history.json
+    if [ -f "$REPO_ROOT/docs/git-history.json" ]; then
+        _rc=0; _would_clobber "docs/git-history.json" "." || _rc=$?
+        case $_rc in
+            0) echo "⚠️  Skipping git-history.json: fresh export empty or invalid but HEAD has content (worktree may lack .deciduous/deciduous.db). Committed version preserved." ;;
+            2) # Also undo a `git add -A` that staged it since (when HEAD has no copy),
+               # if what's staged is empty too; staged real content stays.
+               _unstage_if_empty "docs/git-history.json" "."
+               echo "⏭️  Not staging git-history.json: the export is empty and the file isn't committed yet (or was removed from the index)." ;;
+            *) git add docs/git-history.json ;;
+        esac
+    fi
     echo "✅ Decision graph synced"
 else
     echo "⚠️  Deciduous sync failed (non-blocking)"
 fi
 
 # ── 5. Upload DBs to S3-compatible blob storage ─────────────────────
-if [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$BACKUP_S3_SECRET_ACCESS_KEY" ] && [ -n "$BACKUP_S3_ENDPOINT" ]; then
+# A claude.ai cloud session's DBs start empty and never sync back (see the
+# template CLAUDE.md), so uploading them would overwrite the real backup —
+# even when the cloud environment happens to hold the credentials.
+if [ "$CLAUDE_CODE_REMOTE" = "true" ]; then
+    echo "⏭️  Cloud session: not backing up databases (cloud DBs never sync back)"
+elif [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$BACKUP_S3_SECRET_ACCESS_KEY" ] && [ -n "$BACKUP_S3_ENDPOINT" ]; then
     if ! command -v aws &>/dev/null; then
         echo "⚠️  Backup configured but aws CLI not found — skipping (run: brew install awscli)"
     else
     echo "☁️  Pre-commit: backing up databases to $BACKUP_S3_BUCKET..."
-    ENDPOINT="--endpoint-url=$BACKUP_S3_ENDPOINT --region=${BACKUP_S3_REGION:-auto}"
+    ENDPOINT=(--endpoint-url "$BACKUP_S3_ENDPOINT" --region "${BACKUP_S3_REGION:-auto}")
 
     export AWS_ACCESS_KEY_ID="$BACKUP_S3_ACCESS_KEY_ID"
     export AWS_SECRET_ACCESS_KEY="$BACKUP_S3_SECRET_ACCESS_KEY"
-    S3="s3://$BACKUP_S3_BUCKET"
+    # BACKUP_S3_PREFIX (set by `new-project --finish` on a second machine
+    # sharing the bucket) keeps each machine's objects apart.
+    S3="s3://$BACKUP_S3_BUCKET${BACKUP_S3_PREFIX:+/${BACKUP_S3_PREFIX%/}}"
 
     BACKUP_OK=true
 
-    # ┌─ LOCAL EXCEPTION TO THE TEMPLATE ────────────────────────────────┐
-    # │ Dated history + a sanity gate. NOT in project-template; a sync   │
-    # │ will overwrite this. See #286.                                   │
-    # └──────────────────────────────────────────────────────────────────┘
-    # Cloudflare R2 does NOT implement bucket versioning — PutBucketVersioning,
-    # GetBucketVersioning and ListObjectVersions are all unimplemented in its
-    # S3 API. So `$S3/issues.db` is a single object with no history, and every
-    # commit overwrites it.
-    #
-    # On 2026-08-07 that came within one commit of being unrecoverable: checking
-    # out an old branch that TRACKS .chainlink/issues.db destroyed the live
-    # database, chainlink silently created an empty one, and any commit made in
-    # that state would have uploaded the empty DB over the only good copy.
-    #
-    # Two guards, since R2 gives us neither:
-    #   1. Every upload also writes a dated key, so history exists.
-    #   2. A degenerate DB is not uploaded at all. `sqlite3` is already a
-    #      project dependency; if it is missing we upload anyway rather than
-    #      silently stop backing up.
-    BACKUP_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-
-    # Refuse to back up a database with implausibly few rows. Returns 0 (sane)
-    # when sqlite3 is unavailable or the table is unknown — fail open, because
-    # a missed guard is better than a missed backup.
-    backup_row_sanity() {  # $1 = db path, $2 = table, $3 = floor
-        command -v sqlite3 &>/dev/null || return 0
-        local n
-        n=$(sqlite3 "$1" "SELECT COUNT(*) FROM $2;" 2>/dev/null) || return 0
-        [ -z "$n" ] && return 0
-        [ "$n" -ge "$3" ]
+    # In a linked worktree (a Sesh session, `git worktree add`), back up a
+    # DB only when it's a symlink to the primary checkout's own DB (see
+    # scripts/link-shared-dbs.sh). A real file there is a worktree-local
+    # copy — often one chainlink/deciduous just created empty — and it, or
+    # a link to any other DB, would overwrite the real backup. The primary
+    # is found and verified the same way link-shared-dbs.sh does it.
+    _git_in() { (cd "$1" && unset $(git rev-parse --local-env-vars) && git rev-parse --path-format=absolute "${@:2}") 2>/dev/null; }
+    _common_dir="$(_git_in "$REPO_ROOT" --git-common-dir)"
+    _linked=false
+    _primary=""
+    if [ "$(_git_in "$REPO_ROOT" --git-dir)" != "$_common_dir" ]; then
+        _linked=true
+        for _candidate in "${SESH_ROOT_PATH:-}" "$(dirname "$_common_dir")"; do
+            [ -n "$_candidate" ] && [ -d "$_candidate" ] || continue
+            _top="$(_git_in "$_candidate" --show-toplevel)" || continue
+            if [ -n "$_top" ] && [ "$(_git_in "$_top" --git-dir)" = "$_common_dir" ]; then
+                _primary="$_top"
+                break
+            fi
+        done
+    fi
+    # The file behind $1, through a linked file or a linked folder (Sesh
+    # setups link either). Best effort: what can't be resolved stays as is.
+    _real_path() {
+        local p="$1" t d n=0
+        while [ -L "$p" ] && [ $n -lt 40 ]; do
+            t="$(readlink "$p")"
+            case "$t" in /*) p="$t" ;; *) p="$(dirname "$p")/$t" ;; esac
+            n=$((n + 1))
+        done
+        d="$(cd -P "$(dirname "$p")" 2>/dev/null && pwd -P)" || { echo "$p"; return; }
+        echo "$d/$(basename "$p")"
+    }
+    _backup_db() {
+        [ -f "$REPO_ROOT/$1" ] || return 1
+        [ "$_linked" = true ] || return 0
+        if [ -n "$_primary" ] && [ -f "$_primary/$1" ] \
+            && [ "$(_real_path "$REPO_ROOT/$1")" = "$(_real_path "$_primary/$1")" ]; then
+            return 0
+        fi
+        echo "  ⚠️  Skipping $1: not a link to the primary checkout's DB (run scripts/link-shared-dbs.sh)"
+        return 1
     }
 
-    # History object uploads BEFORE the mutable backup object in both blocks
-    # below: R2 gives `$S3/issues.db` / `$S3/deciduous.db` no version history
-    # (see the R2-versioning note above), so it is the ONLY recovery point.
-    # Writing history first means a failed history upload aborts before the
-    # mutable object is overwritten, instead of after — the mutable copy is
-    # the non-critical step now, since a history snapshot already exists to
-    # fall back to if it fails. (#307, CodeRabbit PR #103)
-    if [ -f "$REPO_ROOT/.chainlink/issues.db" ]; then
-        if ! backup_row_sanity "$REPO_ROOT/.chainlink/issues.db" issues 25; then
-            echo "  🛑 issues.db looks EMPTY or reset — refusing to overwrite the backup."
-            echo "     A fresh chainlink DB (numbering restarts at #1) means the live one"
-            echo "     was destroyed. Restore first; uploading now would clobber the copy"
-            echo "     you would restore FROM. See the recovery notes on #286."
-            BACKUP_OK=false
-        elif aws s3 cp "$REPO_ROOT/.chainlink/issues.db" \
-                "$S3/history/issues-$BACKUP_STAMP.db" $ENDPOINT --quiet 2>&1; then
-            aws s3 cp "$REPO_ROOT/.chainlink/issues.db" "$S3/issues.db" $ENDPOINT --quiet 2>&1 || true
-            echo "  ✅ issues.db → $BACKUP_S3_BUCKET (+ history/issues-$BACKUP_STAMP.db)"
-        else
-            echo "  ⚠️  issues.db history upload failed — recovery point not written, skipping backup"
-            BACKUP_OK=false
+    # R2 has no bucket versioning, so `$S3/<name>.db` alone is a single
+    # object every commit overwrites. Two guards make up for it:
+    #   1. Every upload also writes history/<name>-<UTC stamp>-<pid>.db, so
+    #      older copies survive (restore one with restore-dbs.sh --from).
+    #   2. A DB with under half the rows of the last backup (recorded in
+    #      `$S3/<name>.db.rows`) isn't uploaded: that's what a destroyed DB
+    #      that chainlink/deciduous silently recreated looks like, and
+    #      uploading it would overwrite the copy you'd restore from. An
+    #      intended shrink goes through with BACKUP_ALLOW_SHRINK=1.
+    # With sqlite3, the rows are counted in a `.backup` snapshot and that
+    # same snapshot is uploaded, so the count describes the bytes that land
+    # (the live DB can change in between, and a plain copy of a DB mid-write
+    # can be torn).
+    # Without sqlite3 the guard fails open: the live file is uploaded and
+    # the row check skipped (and the stored count dropped, since it no
+    # longer describes the backup).
+    # Otherwise it fails closed: a DB sqlite3 can't snapshot or count
+    # (corrupt, or not a DB) or a stored count that can't be read (anything
+    # but "not found") skips the upload, so a bad DB never replaces a good
+    # backup. A failed history copy doesn't fail the backup.
+    BACKUP_STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    _rows() {  # $1 = db, $2 = table → row count; nothing without sqlite3; fails if the query does
+        command -v sqlite3 &>/dev/null || return 0
+        local out
+        out=$(sqlite3 "$1" "SELECT COUNT(*) FROM $2;" 2>/dev/null) || return 1
+        out=$(printf '%s' "$out" | tr -dc '0-9')
+        [ -n "$out" ] || return 1
+        echo "$out"
+    }
+    # _upload_db only owns the snapshot's temp file, so every return path
+    # of _upload_snapshot cleans it up.
+    _upload_db() {  # $1 = path under REPO_ROOT, $2 = object name, $3 = table
+        local snap rc=0
+        if ! snap="$(mktemp)"; then
+            echo "  ⚠️  $2.db: couldn't create a temp file for its snapshot — not uploading (non-blocking)"
+            return 1
         fi
+        _upload_snapshot "$1" "$2" "$3" "$snap" || rc=$?
+        rm -f "$snap"
+        return $rc
+    }
+    _upload_snapshot() {  # $1-$3 as _upload_db, $4 = temp file for the snapshot
+        local src="$REPO_ROOT/$1" name="$2" snap="$4" up="$REPO_ROOT/$1" rows="" prev tmp err shrink=false rc=0
+        if command -v sqlite3 &>/dev/null; then
+            # `.backup` goes through SQLite's locking, so it's consistent
+            # even if chainlink/deciduous is writing right now.
+            if sqlite3 "$src" ".backup '$snap'" >/dev/null 2>&1; then
+                up="$snap"
+            fi
+            if [ "$up" != "$snap" ] || ! rows=$(_rows "$snap" "$3"); then
+                if [ "${BACKUP_ALLOW_SHRINK:-}" != 1 ]; then
+                    echo "  🛑 sqlite3 can't count $name.db's $3 rows — refusing to overwrite the backup with it."
+                    echo "     It may be corrupt. Check it, restore it (scripts/restore-dbs.sh), or if it's fine:"
+                    echo "     BACKUP_ALLOW_SHRINK=1 git commit ..."
+                    return 1
+                fi
+                rows=""
+            fi
+        fi
+        tmp="$(mktemp)"; err="$(mktemp)"
+        # Only the CLI's own missing-object status means "no count yet";
+        # any other failure (a 404 in an endpoint URL included) is a failure.
+        if aws s3 cp "$S3/$name.db.rows" - "${ENDPOINT[@]}" >"$tmp" 2>"$err"; then
+            prev=$(tr -dc '0-9' <"$tmp")
+        elif grep -qE 'An error occurred \((404|NoSuchKey)\) when calling the [A-Za-z]+ operation' "$err"; then
+            prev=""  # no count stored yet: nothing to compare against
+        else
+            rm -f "$tmp" "$err"
+            echo "  ⚠️  $name.db's last row count couldn't be read — not uploading (non-blocking)"
+            return 1
+        fi
+        rm -f "$tmp" "$err"
+        if [ -n "$rows" ] && [ -n "$prev" ] && [ "$prev" -ge 4 ] && [ $((rows * 2)) -lt "$prev" ] \
+            && [ "${BACKUP_ALLOW_SHRINK:-}" != 1 ]; then
+            echo "  🛑 $name.db has $rows rows; the last backup had $prev — refusing to overwrite it."
+            echo "     A DB that suddenly lost most of its rows was usually destroyed and recreated"
+            echo "     empty. Restore it (scripts/restore-dbs.sh), or if the shrink is intended:"
+            echo "     BACKUP_ALLOW_SHRINK=1 git commit ..."
+            return 1
+        fi
+        # The stored count must never sit below the DB it describes: a stale
+        # lower count would let a later, shrunken DB past the guard. So:
+        #   - Not a shrink: the count goes first (a higher count is only
+        #     stricter). If it can't be saved (or, without sqlite3, the stale
+        #     one can't be dropped), skip the upload. If the DB upload then
+        #     fails, put back the count that matches the backup still there
+        #     (or drop it if there was none).
+        #   - A shrink: the DB goes first and the lower count after it, so a
+        #     crash in between leaves the old, higher count in place.
+        if [ -n "$rows" ] && [ -n "$prev" ] && [ "$rows" -lt "$prev" ]; then
+            shrink=true
+        elif [ -n "$rows" ]; then
+            if ! printf '%s\n' "$rows" | aws s3 cp - "$S3/$name.db.rows" "${ENDPOINT[@]}" --quiet 2>&1; then
+                echo "  ⚠️  $name.db row count couldn't be saved — not uploading (non-blocking)"
+                return 1
+            fi
+        elif ! aws s3 rm "$S3/$name.db.rows" "${ENDPOINT[@]}" --quiet 2>&1; then
+            echo "  ⚠️  $name.db's old row count couldn't be cleared — not uploading (non-blocking)"
+            return 1
+        fi
+        if ! aws s3 cp "$up" "$S3/$name.db" "${ENDPOINT[@]}" --quiet 2>&1; then
+            echo "  ⚠️  $name.db upload failed (non-blocking)"
+            if [ "$shrink" = true ]; then
+                :  # the count wasn't touched
+            elif [ -n "$prev" ]; then
+                printf '%s\n' "$prev" | aws s3 cp - "$S3/$name.db.rows" "${ENDPOINT[@]}" --quiet 2>&1 \
+                    || echo "  ⚠️  $name.db row count couldn't be restored to $prev — the next guard check may be off"
+            else
+                aws s3 rm "$S3/$name.db.rows" "${ENDPOINT[@]}" --quiet 2>&1 || true
+            fi
+            return 1
+        fi
+        if [ "$shrink" = true ] && ! printf '%s\n' "$rows" | aws s3 cp - "$S3/$name.db.rows" "${ENDPOINT[@]}" --quiet 2>&1; then
+            # Still the old, higher count: stricter, never looser.
+            echo "  ⚠️  $name.db row count couldn't be lowered to $rows (still $prev) — the next commit may need BACKUP_ALLOW_SHRINK=1"
+            rc=1
+        fi
+        aws s3 cp "$up" "$S3/history/$name-$BACKUP_STAMP.db" "${ENDPOINT[@]}" --quiet 2>&1 \
+            || echo "  ⚠️  $name.db history copy failed (non-blocking)"
+        echo "  ✅ $name.db → ${S3#s3://} (+ history/$name-$BACKUP_STAMP.db)"
+        return $rc
+    }
+
+    if _backup_db .chainlink/issues.db; then
+        _upload_db .chainlink/issues.db issues issues || BACKUP_OK=false
     fi
 
-    if [ -f "$REPO_ROOT/.deciduous/deciduous.db" ]; then
-        if ! backup_row_sanity "$REPO_ROOT/.deciduous/deciduous.db" decision_nodes 25; then
-            echo "  🛑 deciduous.db looks EMPTY or reset — refusing to overwrite the backup."
-            BACKUP_OK=false
-        elif aws s3 cp "$REPO_ROOT/.deciduous/deciduous.db" \
-                "$S3/history/deciduous-$BACKUP_STAMP.db" $ENDPOINT --quiet 2>&1; then
-            aws s3 cp "$REPO_ROOT/.deciduous/deciduous.db" "$S3/deciduous.db" $ENDPOINT --quiet 2>&1 || true
-            echo "  ✅ deciduous.db → $BACKUP_S3_BUCKET (+ history/deciduous-$BACKUP_STAMP.db)"
-        else
-            echo "  ⚠️  deciduous.db history upload failed — recovery point not written, skipping backup"
-            BACKUP_OK=false
-        fi
+    if _backup_db .deciduous/deciduous.db; then
+        _upload_db .deciduous/deciduous.db deciduous decision_nodes || BACKUP_OK=false
     fi
 
     if [ "$BACKUP_OK" = true ]; then
@@ -392,6 +569,22 @@ set -e
 
 REMOTE="$1"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Tests below run without the project's runtime environment (test binaries
+# don't load .env). Variables they need go in `.hookenv` — untracked,
+# KEY=value lines, parsed (not executed) like .env.
+if [ -f "$REPO_ROOT/.hookenv" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        line="${line#export }"
+        [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+        value="${BASH_REMATCH[2]}"
+        value="${value%\"}" ; value="${value#\"}"
+        value="${value%\'}" ; value="${value#\'}"
+        export "${BASH_REMATCH[1]}=$value"
+    done < "$REPO_ROOT/.hookenv"
+fi
+
 ZERO_SHA=0000000000000000000000000000000000000000
 
 # Reduce a remote URL to host/owner/repo, so the SSH and HTTPS spellings of one
@@ -678,22 +871,9 @@ $f"
             done
         fi
 
-        # ┌─ LOCAL EXCEPTION TO THE TEMPLATE ────────────────────────────────┐
-        # │ This block is charcoal-specific and is NOT in project-template.  │
-        # │ `update-project-from-template` will overwrite it — if a sync     │
-        # │ drops these four lines, `git push` starts failing again with     │
-        # │ model-gated test failures, which is a confusing symptom for a    │
-        # │ missing env var. Re-apply, or upstream it. See #284.             │
-        # └──────────────────────────────────────────────────────────────────┘
-        # Point model-gated tests at the checked-out models. Test binaries do
-        # not load .env (dotenvy runs in main.rs only), so without this they
-        # look in the platform data dir, fail to find the ONNX files, and — now
-        # that they fail loudly instead of silently passing (#257) — block every
-        # push on a machine that has models but no exported variable (#284).
-        if [ -d "$REPO_ROOT/models" ] && [ -z "$CHARCOAL_MODEL_DIR" ]; then
-            export CHARCOAL_MODEL_DIR="$REPO_ROOT/models"
-        fi
-
+        # Model-gated tests need CHARCOAL_MODEL_DIR: test binaries do not load
+        # .env, so without it they miss the ONNX files and fail (#284). It comes
+        # from `.hookenv`, loaded at the top of this hook — see CLAUDE.md.
         if [ -n "$TEST_ARGS" ]; then
             # `--features web` rather than the default: web is where most of
             # the code lives, and the default build does not compile it at all,
@@ -778,6 +958,28 @@ HOOK
 chmod +x "$HOOKS_DIR/pre-push"
 echo "  ✓ pre-push"
 
+# ── pre-merge-commit ─────────────────────────────────────────────────
+# git merge is allowed (so a feature branch can take main in), but a merge
+# commit on main itself is refused, like a plain commit there. git runs
+# pre-merge-commit, not pre-commit, for merges.
+
+cat > "$HOOKS_DIR/pre-merge-commit" << 'HOOK'
+#!/usr/bin/env bash
+# pre-merge-commit hook: no merge commits on main.
+# Bypass (emergency only): git merge --no-verify
+if [ "$(git branch --show-current)" = "main" ]; then
+    echo ""
+    echo "❌ Merging into main locally is not allowed."
+    echo "   Merge main into your feature branch instead, or merge the PR on GitHub."
+    echo ""
+    exit 1
+fi
+HOOK
+
+chmod +x "$HOOKS_DIR/pre-merge-commit"
+echo "  ✓ pre-merge-commit"
+fi  # end: hooks are only written when git will read them (core.hooksPath unset)
+
 # Returns 0 iff $1 is Git's default `info/exclude` stub — i.e. contains
 # only comment lines and blanks, no real ignore patterns. We can't
 # byte-compare against a canonical stub because different git versions
@@ -849,6 +1051,31 @@ elif [ -e "$LOCAL_IGNORE" ] || [ -h "$EXCLUDE_FILE" ]; then
     fi
 fi
 
+# ── Merge drivers for machine-generated exports ──────────────────────
+#
+# Merge drivers live in git CONFIG, not in .gitattributes, so each clone
+# wires them here (same per-clone contract as the exclude symlink above).
+# One custom driver, named in .gitattributes:
+#
+#   keep-ours (deciduous docs exports): the pre-commit hook regenerates
+#   docs/graph-data.json and docs/git-history.json from the local database
+#   on every commit, and deciduous's git-merged event files are the real
+#   source of truth — so at merge time the branch's own copy is always an
+#   acceptable resolution. `true` exits 0 leaving %A (ours) in place.
+#
+# (.chainlink/issues-export.json used to have a record-level union driver
+# here. It is no longer committed at all — see ADR 0005 — so there is
+# nothing to merge. Clones wired before that change keep a harmless
+# `merge.chainlink-union.*` entry in .git/config; `git config --unset-all`
+# it if you want a tidy config.)
+(cd "$REPO_ROOT" && git config merge.keep-ours.driver true)
+echo "  ✓ merge driver (keep-ours for docs exports)"
+
 echo ""
-echo "Done. Both hooks are installed."
+if [ -n "$HOOKS_DEAD" ]; then
+    echo "$HOOKS_DEAD"
+    echo "Per-clone setup done; the hooks were NOT installed."
+    exit 1
+fi
+echo "Done. The hooks are installed."
 echo "Bypass any hook with --no-verify (emergency only)."

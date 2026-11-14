@@ -1,5 +1,37 @@
 [
   {
+    "hash": "69260e461813e1ee4ec4ea7987df42d1a4cf304b",
+    "short_hash": "69260e4",
+    "author": "Bryan Guffey",
+    "date": "2026-11-13T18:11:06-08:00",
+    "message": "chore: re-sync from project-template ffee501\n\nBrings in #66 (backups fail closed on a corrupt DB or unreadable row\ncount; linked folders backed up; restore writes through links), #67 (no\nstaging of untracked empty exports), #69 (work-check blocks only git\ncommands bash actually runs, e.g. no longer a git merge mention in a\nmessage; refuses commit/merge/push when pre-commit or pre-push is not\ninstalled) and #70 (BACKUP_S3_PREFIX; .env mode 600).\n\ninstall-hooks.sh is the template version with charcoal's #367\naffected-tests pre-push gate re-ported under the .hookenv loader,\nunchanged from the previous commit. .gitattributes and .sesh/config.json\nkeep charcoal's versions.\n\nRefs #434\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "d711dc4b84df32ba86619572608200ff824eabab",
+    "short_hash": "d711dc4",
+    "author": "Bryan Guffey",
+    "date": "2026-11-12T23:43:49-08:00",
+    "message": "chore: sync from project-template (2026-11)\n\nCame in from project-template main (bfd9b99): the AI review workflows\n(PR-Agent + Claude Haiku 5.5) and Semgrep; core git blocks in work-check\nwith `git merge` now allowed; a pre-merge-commit hook; backup history\nwith a shrink guard; .hookenv loading in pre-push; cloud-setup.sh,\nrestore-dbs.sh --list/--from, and link-shared-dbs.sh.\n\nKept or restored:\n- pre-push keeps charcoal's #367 affected-tests gate. The template\n  version runs plain `cargo test` over everything (no --features web).\n- the CHARCOAL_MODEL_DIR default is dropped in favour of .hookenv,\n  documented in CLAUDE.md and README; .hookenv added to the Sesh copy list.\n- the dated-backup / 25-row sanity gate is dropped; the template's\n  history/ copies + shrink guard replace it.\n- .sesh/config.json stays charcoal's (custom setup, PORT handling).\n- .gitattributes keeps linguist-generated/-diff on the deciduous exports\n  alongside the template's keep-ours driver.\n\nRefs #434\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "files_changed": 19
+  },
+  {
+    "hash": "3119f9b1544b5edd4ad6785ee577ab0e2f954a53",
+    "short_hash": "3119f9b",
+    "author": "Bryan Guffey",
+    "date": "2026-11-12T21:41:14-08:00",
+    "message": "Merge pull request #165 from Work-Right/staging\n\nchore(release): promote staging to main (#427 ONNX arena shrink, #432 Sesh config)",
+    "files_changed": 0
+  },
+  {
+    "hash": "e8f9740f8adf24a4340e63eb14a512b5ea5f4648",
+    "short_hash": "e8f9740",
+    "author": "Bryan Guffey",
+    "date": "2026-11-12T19:58:58-08:00",
+    "message": "fix(432): write the session PORT first in .env\n\nCodeRabbit on #166: filtering only `^PORT=` missed `export PORT=` and\n`PORT = …`, and appending PORT last left earlier ${PORT} references\nexpanding to nothing. dotenvy keeps the FIRST value it sees for a key\n(iter.rs load skips keys already set), so writing PORT as line one\nmakes the session port win however the rest of the file spells it;\nthe widened filter just drops the stale duplicates.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
     "hash": "7557204aad0c10e98952f0cf601c39c720f7f133",
     "short_hash": "7557204",
     "author": "Bryan Guffey",

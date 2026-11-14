@@ -1,0 +1,135 @@
+# AI code review for PRIVATE repos, on the owner's self-hosted runner
+# (an OrbStack Linux machine on the Mac mini). PR-Agent posts the review;
+# Claude, via the org's ANTHROPIC_API_KEY, writes it.
+#
+# Twin of review-public.yml: keep the two identical apart from `runs-on` and
+# the job's `if`. Steps aren't factored into a composite action on purpose: a
+# local action needs the PR's code checked out on the runner, and this job
+# needs no checkout at all (PR-Agent reads the diff through the GitHub API).
+name: AI review (private)
+
+on:
+  pull_request:
+    # synchronize re-reviews each push (PR-Agent updates its one review
+    # comment rather than adding another). Affordable on Haiku 5.5; the
+    # original "no synchronize" rule was about volume under per-seat pricing.
+    types: [opened, ready_for_review, synchronize]
+  issue_comment:
+    # A PR comment starting with "/" (e.g. /review, /describe, /improve)
+    # re-runs PR-Agent on demand. Gated below to people with write access.
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  # Comment runs only. A comment event doesn't say whether the PR comes from
+  # a fork, and author_association counts read-only collaborators, so ask the
+  # API: the PR's head must be this repo and the commenter must have write
+  # access. Runs on GitHub-hosted, so nothing reaches the review job's runner
+  # until this passes.
+  comment-gate:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.repository.private == true &&
+      github.event.issue.pull_request &&
+      github.event.sender.type != 'Bot' &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+      startsWith(github.event.comment.body, '/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+        run: |
+          head=$(gh api "repos/$REPO/pulls/$PR" --jq .head.repo.full_name)
+          perm=$(gh api "repos/$REPO/collaborators/$COMMENTER/permission" --jq .permission)
+          echo "PR head: $head; $COMMENTER has: $perm"
+          if [ "$head" = "$REPO" ] && { [ "$perm" = admin ] || [ "$perm" = write ]; }; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  review:
+    needs: comment-gate
+    # SECURITY CONTROL, not an optimization. This job runs on the owner's own
+    # hardware, so it must never run for a public repo: anyone can open a PR
+    # there, and a fork PR would get its workflow run on this machine. GitHub
+    # evaluates this `if` before a runner is assigned, so if the repo is ever
+    # made public the job is skipped, never queued. It also refuses PRs from
+    # forks (even of a private repo) and drafts, and runs for a comment only
+    # when it's a "/" command from someone with write access (a comment run
+    # uses the default branch's workflow, not the PR's). A second lock sits
+    # outside the repo: the org runner group has "allow public repositories"
+    # off.
+    # This `if` can't stop a pull_request that edits this file: GitHub runs
+    # the PR's own copy of the workflow. What keeps fork PRs off the runner
+    # is two org settings, both off as of 2026-11-13: forking private repos,
+    # and running workflows from fork PRs on private repos. Keep them off.
+    # Anyone with write access can still push a branch that edits this file;
+    # that access is trusted.
+    # always(): run even though comment-gate is skipped for pull_request events.
+    if: >-
+      always() &&
+      github.event.repository.private == true && (
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name == github.repository &&
+         github.event.pull_request.draft == false &&
+         (github.event.action != 'synchronize' || github.event.sender.type != 'Bot')) ||
+        (github.event_name == 'issue_comment' &&
+         needs.comment-gate.outputs.ok == 'true')
+      )
+    # Job-level, so a comment that doesn't qualify, or a bot push (which
+    # PR-Agent would ignore anyway), has its job skipped and never joins the
+    # group, and so can't cancel a review in progress. Per PR number: a
+    # comment run's ref is the default branch.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: true
+    runs-on: [self-hosted, linux, arm64, macmini]
+    timeout-minutes: 15
+    steps:
+      - name: PR-Agent review
+        # PR-Agent v0.50.0 (github.com/The-PR-Agent/pr-agent, formerly
+        # qodo-ai/pr-agent), its GitHub Action image pinned by digest. The
+        # action wrapper's Dockerfile pulls a rolling tag, so pinning the
+        # wrapper's commit wouldn't pin what runs; the project's SECURITY.md
+        # recommends this form. Multi-arch (amd64 + arm64). Provenance: built
+        # by The-PR-Agent/pr-agent .github/workflows/publish.yml at v0.50.0.
+        uses: docker://pragent/pr-agent@sha256:548e894a88071180832b2f4233f734d0acd0db1a879e2fcbaa70bac8b8372ebe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC__KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Haiku 5.5: caught the same planted bugs as Sonnet 5.5 in testing, at
+          # ~1/15 of the cost (~$0.0025 per review of a ~15k-token diff).
+          config.model: "anthropic/claude-haiku-5-5"
+          # PR-Agent's default fallback is an OpenAI model; there's no OpenAI key.
+          config.fallback_models: "[]"
+          # PR-Agent's request budget (diff + its prompt + the reply reserve,
+          # ~20k of overhead) defaults to 32k and clips the diff past it, so
+          # large PRs were reviewed in part (soot#24 skipped whole files).
+          # Haiku 5.5 takes 1M; 128k fits a ~100k-token diff, ~$0.013/review.
+          config.max_model_tokens: "128000"
+          # Review only. describe would rewrite the PR description and improve
+          # adds a second model call per PR; turn them on here if wanted.
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "false"
+          github_action_config.auto_improve: "false"
+          github_action_config.pr_actions: '["opened", "ready_for_review"]'
+          # On synchronize, re-run /review (merge commits and bot pushes skipped).
+          github_action_config.handle_push_trigger: "true"
+          github_action_config.push_commands: '["/review"]'
+          # Measurement while per-review cost is unknown: append model, tokens,
+          # time and estimated cost to each review comment. Turn off once known.
+          config.output_run_details: "true"
+          config.output_run_cost: "true"

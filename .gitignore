@@ -5,6 +5,8 @@
 .env
 .env.*
 !.env.example
+# Test-only environment for the pre-push hook (see scripts/install-hooks.sh).
+.hookenv
 
 # ── Per-project ignore extensions ──────────────────────────────────
 # `.gitignore.local` is the extension point for project-specific ignore
@@ -84,6 +86,10 @@ logs/
 
 # ── Claude Code per-clone state ────────────────────────────────────
 .claude/settings.local.json
+
+# ── Cloudflare cf CLI local cache ──────────────────────────────────
+# `cf` writes account details here on first use.
+.cloudflare/
 
 # ── Deciduous local state ──────────────────────────────────────────
 # Everything under .deciduous/ is local ephemeral state (the DB is

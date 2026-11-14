@@ -422,6 +422,8 @@ The dashboard is available at `http://localhost:3000` (or your Tailscale Funnel 
 ```bash
 # First-time setup: install git hooks (enforces fmt + clippy + tests)
 ./scripts/install-hooks.sh
+# The pre-push tests need the model path (test binaries don't read .env)
+echo "CHARCOAL_MODEL_DIR=$PWD/models" > .hookenv
 
 cargo test --features web   # Run all 225 tests (unit + integration + OAuth)
 cargo clippy                # Lint
